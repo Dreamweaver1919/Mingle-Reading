@@ -32,7 +32,7 @@ Muse Reading currently has four cooperating layers:
    The static web reader in [frontend/public](/C:/Users/21358/Desktop/MuseReading/frontend/public) handles upload, chapter navigation, paragraph selection, summary triggers, and question submission.
 
 2. `Application and orchestration layer`
-   The FastAPI app in [api/app.py](/C:/Users/21358/Desktop/MuseReading/api/app.py) exposes upload, book, persona, QA, orchestration, summary, and graph endpoints.
+   The FastAPI app in [backend/api/app.py](/C:/Users/21358/Desktop/MuseReading/backend/api/app.py) exposes upload, book, persona, QA, orchestration, summary, and graph endpoints.
 
 3. `Knowledge and retrieval layer`
    The backend builds normalized book records, retrieval chunks, and a temporal context graph from uploaded text. Retrieval is progress-aware and designed to support anti-spoiler filtering before answer generation.
@@ -121,7 +121,7 @@ To use `lu-xun`, `mark-twain`, or `zhang-ailing`, copy [`.env.example`](/C:/User
 ### Run The API And Reader
 
 ```bash
-uvicorn api.app:app --reload
+uvicorn backend.api.app:app --reload
 ```
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
@@ -148,7 +148,7 @@ Screenshot placeholder:
 
 ## API Overview
 
-Current endpoints exposed by [api/app.py](/C:/Users/21358/Desktop/MuseReading/api/app.py):
+Current endpoints exposed by [backend/api/app.py](/C:/Users/21358/Desktop/MuseReading/backend/api/app.py):
 
 - `GET /api/health`
 - `GET /api/books`
@@ -174,20 +174,30 @@ Current endpoints exposed by [api/app.py](/C:/Users/21358/Desktop/MuseReading/ap
 ## Repository Structure
 
 ```text
-api/                 FastAPI entrypoint
 architecture/        interface and system design notes
-backend/             core models, config, storage
+backend/             backend application, data, knowledge base, safety, and llm memory modules
 benchmarks/          benchmark fixtures for smoke evaluation
 data/                raw, processed, annotation, eval, and manifest assets
 docs/                architecture and data design documentation
 eval/                evaluation runners
 examples/            demo reading text
-frontend/            static reader UI
+frontend/            static reader UI and browser-facing assets
 schemas/             JSON schema definitions
 scripts/             dataset and registry builders
-services/            ingestion, graph, orchestration, qa, persona, safety, summary
 tests/               regression tests
 workspace_state/     local runtime artifacts such as saved books and graphs
+```
+
+### Backend module layout
+
+```text
+backend/
+  api/               FastAPI endpoints and app wiring
+  common/            shared config and Pydantic models
+  data/              ingestion and local persistence
+  knowledge_base/    graph, QA retrieval, and character modules
+  safety/            anti-spoiler safeguards
+  llm_memory/        persona, orchestration, and summary generation
 ```
 
 ## Evaluation

@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
 
-from backend.models import BookChunk, BookRecord
+from backend.common.models import BookChunk, BookRecord
 
 try:
     from pypdf import PdfReader

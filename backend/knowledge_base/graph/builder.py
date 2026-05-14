@@ -4,7 +4,7 @@ import itertools
 import re
 from collections import Counter, defaultdict
 
-from backend.models import BookChunk, BookRecord
+from backend.common.models import BookChunk, BookRecord
 
 from .models import (
     ChapterNode,

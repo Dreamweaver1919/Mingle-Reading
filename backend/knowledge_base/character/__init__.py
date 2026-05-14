@@ -1,4 +1,4 @@
-from services.character.service import (
+from backend.knowledge_base.character.service import (
     answer_as_character,
     generate_character_profile,
     generate_inline_bubbles,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from backend.models import SummaryResponse
-from services.persona.persona_service import generate_persona_response
+from backend.common.models import SummaryResponse
+from backend.llm_memory.persona.persona_service import generate_persona_response
 
 
 def summarize_chapter(book, current_chapter: int, persona_id: str) -> SummaryResponse:

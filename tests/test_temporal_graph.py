@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from services.graph.builder import build_temporal_graph
-from services.graph.models import GraphQuery
-from services.graph.retrieval import TemporalGraphRetriever, search_temporal_graph
-from services.graph.storage import load_graph, save_graph
-from services.ingest.parser import build_book_record
+from backend.knowledge_base.graph.builder import build_temporal_graph
+from backend.knowledge_base.graph.models import GraphQuery
+from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever, search_temporal_graph
+from backend.knowledge_base.graph.storage import load_graph, save_graph
+from backend.data.ingest.parser import build_book_record
 
 
 def demo_graph():
@@ -68,7 +68,7 @@ def test_temporal_graph_search_respects_progress_boundary_and_filters():
 
 
 def test_temporal_graph_storage_persists_metadata(tmp_path, monkeypatch):
-    import services.graph.storage as graph_storage
+    import backend.knowledge_base.graph.storage as graph_storage
 
     graph = demo_graph()
     monkeypatch.setattr(graph_storage, "GRAPHS_DIR", tmp_path)

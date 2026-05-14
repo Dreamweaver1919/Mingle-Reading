@@ -14,9 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from backend.models import BookChunk, BookRecord
-from services.graph.builder import TemporalGraphBuilder
-from services.ingest.parser import (
+from backend.common.models import BookChunk, BookRecord
+from backend.knowledge_base.graph.builder import TemporalGraphBuilder
+from backend.data.ingest.parser import (
     extract_candidate_characters,
     normalize_text,
     score_spoiler_level,

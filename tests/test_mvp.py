@@ -4,11 +4,11 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import eval.run_eval as eval_module
-from backend.models import QuestionRequest
-from services.ingest.parser import build_book_record
-from services.ingest import parser as ingest_parser
-from services.qa import answering as qa_answering
-from services.summary import chapter_summary as summary_module
+from backend.common.models import QuestionRequest
+from backend.data.ingest.parser import build_book_record
+from backend.data.ingest import parser as ingest_parser
+from backend.knowledge_base.qa import answering as qa_answering
+from backend.llm_memory.summary import chapter_summary as summary_module
 
 
 def demo_record():
@@ -102,7 +102,7 @@ def test_summary_returns_current_chapter_only(monkeypatch):
 
 def test_eval_runner_reports_demo_sections():
     def fake_eval_answer(request, chunks):
-        from backend.models import QuestionResponse, RetrievedContext
+        from backend.common.models import QuestionResponse, RetrievedContext
 
         chunk = chunks[0]
         return QuestionResponse(
@@ -123,7 +123,7 @@ def test_eval_runner_reports_demo_sections():
         )
 
     def fake_eval_summary(book, current_chapter, persona_id):
-        from backend.models import SummaryResponse
+        from backend.common.models import SummaryResponse
 
         return SummaryResponse(
             summary="Lin opened the old notebook and Aya returned the next afternoon.",

@@ -13,13 +13,13 @@ There is also a `neutral` reader for non-persona output.
 Each persona agent now has all four layers required for direct use:
 
 1. `Agent config`
-   Defined in [services/persona/persona_service.py](/C:/Users/21358/Desktop/MuseReading/services/persona/persona_service.py), including display name, env var names, and prompt traits.
+   Defined in [backend/llm_memory/persona/persona_service.py](/C:/Users/21358/Desktop/MuseReading/backend/llm_memory/persona/persona_service.py), including display name, env var names, and prompt traits.
 2. `Persona RAG knowledge base`
    Loaded from `data/processed/personas/persona_kb/<persona_id>/`.
 3. `Prompt assembly`
    The system prompt, persona evidence, and reader-visible book context are assembled together before generation.
 4. `Real model invocation`
-   [services/persona/model_client.py](/C:/Users/21358/Desktop/MuseReading/services/persona/model_client.py) calls an OpenAI-compatible `/v1/chat/completions` endpoint.
+   [backend/llm_memory/persona/model_client.py](/C:/Users/21358/Desktop/MuseReading/backend/llm_memory/persona/model_client.py) calls an OpenAI-compatible `/v1/chat/completions` endpoint.
 
 ## Required Environment Variables
 

@@ -7,8 +7,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from backend.config import PERSONA_KB_DIR, ROOT_DIR
-from backend.models import (
+from backend.common.config import PERSONA_KB_DIR, ROOT_DIR
+from backend.common.models import (
     ChatMessage,
     PersonaAgentConfig,
     PersonaAgentStatus,
@@ -21,7 +21,7 @@ from backend.models import (
     PersonaRAGHit,
     PersonaRAGQueryRequest,
 )
-from services.persona.model_client import invoke_openai_compatible_chat, invoke_openai_compatible_messages
+from backend.llm_memory.persona.model_client import invoke_openai_compatible_chat, invoke_openai_compatible_messages
 
 
 class PersonaAgentConfigurationError(RuntimeError):

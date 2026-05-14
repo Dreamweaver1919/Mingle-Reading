@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 RUNTIME_DIR = ROOT_DIR / "workspace_state"
 BOOKS_DIR = RUNTIME_DIR / "books"
 UPLOADS_DIR = RUNTIME_DIR / "uploads"

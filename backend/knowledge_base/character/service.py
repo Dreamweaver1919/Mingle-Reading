@@ -6,7 +6,7 @@ from collections import Counter
 from functools import lru_cache
 from typing import Any
 
-from backend.models import (
+from backend.common.models import (
     BookChunk,
     ChatMessage,
     CharacterCandidate,
@@ -15,13 +15,13 @@ from backend.models import (
     CharacterRelationship,
     InlineBubble,
 )
-from services.persona.model_client import invoke_openai_compatible_messages
-from services.persona.persona_service import (
+from backend.llm_memory.persona.model_client import invoke_openai_compatible_messages
+from backend.llm_memory.persona.persona_service import (
     PersonaAgentConfigurationError,
     PersonaAgentInvocationError,
     resolve_persona_runtime,
 )
-from services.qa.retrieval import retrieve_chunks
+from backend.knowledge_base.qa.retrieval import retrieve_chunks
 
 
 _CHARACTER_PROFILE_CACHE: dict[tuple[str, str, int], CharacterProfile] = {}

@@ -32,9 +32,12 @@ python main.py
 
 ## Project Areas
 
-- `api/`: FastAPI app and HTTP endpoints
-- `backend/`: shared models, config, storage helpers
-- `services/`: ingestion, QA, summary, graph, orchestration, safety, persona logic
+- `backend/api/`: FastAPI app and HTTP endpoints
+- `backend/common/`: shared config and Pydantic models
+- `backend/data/`: ingestion and local storage helpers
+- `backend/knowledge_base/`: graph, QA retrieval, and character logic
+- `backend/safety/`: anti-spoiler safeguards
+- `backend/llm_memory/`: persona, orchestration, and summary generation
 - `frontend/public/`: static HTML/CSS/JS reader UI
 - `data/`, `schemas/`, `benchmarks/`, `eval/`: dataset, schema, and evaluation assets
 - `scripts/`: build and dataset utility scripts

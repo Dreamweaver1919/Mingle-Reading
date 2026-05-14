@@ -28,7 +28,7 @@ This gives API consumers a stable chapter-by-chapter browse surface without need
 
 ## Query Layer
 
-`services/graph/retrieval.py` supports progress-aware retrieval with filters for:
+`backend/knowledge_base/graph/retrieval.py` supports progress-aware retrieval with filters for:
 
 - `max_chapter` and `min_chapter`
 - `entity_names`

@@ -5,8 +5,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi.testclient import TestClient
 
-import api.app as app_module
-from services.ingest import parser as ingest_parser
+import backend.api.app as app_module
+from backend.data.ingest import parser as ingest_parser
 
 
 app = app_module.app
@@ -129,7 +129,7 @@ def test_upload_endpoint_accepts_pdf_with_text_layer(monkeypatch):
 
 def test_qa_and_summary_endpoints_use_persona_generation(monkeypatch):
     def fake_answer(*_args, **_kwargs):
-        from backend.models import QuestionResponse
+        from backend.common.models import QuestionResponse
 
         return QuestionResponse(
             answer="鲁迅会先从眼前这段人物动作讲起。",
@@ -141,7 +141,7 @@ def test_qa_and_summary_endpoints_use_persona_generation(monkeypatch):
         )
 
     def fake_summary(*_args, **_kwargs):
-        from backend.models import SummaryResponse
+        from backend.common.models import SummaryResponse
 
         return SummaryResponse(
             summary="张爱玲式总结会先看关系里的冷暖与体面。",

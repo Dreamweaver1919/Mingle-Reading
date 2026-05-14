@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from backend.models import QuestionRequest, QuestionResponse, RetrievedContext
-from services.graph.storage import load_graph
-from services.orchestration.models import ReadingProgress, SelectionAnchor, SelectionContext
-from services.orchestration.service import OrchestrationService
-from services.persona.persona_service import generate_persona_response
-from services.qa.retrieval import retrieve_chunks
-from services.safety.anti_spoiler import is_spoiler_question
+from backend.common.models import QuestionRequest, QuestionResponse, RetrievedContext
+from backend.knowledge_base.graph.storage import load_graph
+from backend.llm_memory.orchestration.models import ReadingProgress, SelectionAnchor, SelectionContext
+from backend.llm_memory.orchestration.service import OrchestrationService
+from backend.llm_memory.persona.persona_service import generate_persona_response
+from backend.knowledge_base.qa.retrieval import retrieve_chunks
+from backend.safety.anti_spoiler import is_spoiler_question
 
 
 def _merge_contexts(local_hits: list[RetrievedContext], graph_hits) -> list[RetrievedContext]:

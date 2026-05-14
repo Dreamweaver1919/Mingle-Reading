@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 
-from backend.models import BookChunk, RetrievedContext
+from backend.common.models import BookChunk, RetrievedContext
 
 
 def tokenize(text: str) -> list[str]:

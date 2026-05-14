@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.config import BOOKS_DIR
-from backend.models import BookRecord
+from backend.common.config import BOOKS_DIR
+from backend.common.models import BookRecord
 
 
 def get_book_path(book_id: str) -> Path:

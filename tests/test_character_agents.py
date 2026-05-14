@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-import api.app as app_module
-from backend.models import (
+import backend.api.app as app_module
+from backend.common.models import (
     CharacterCandidate,
     CharacterChatResponse,
     CharacterProfile,
     CharacterRelationship,
     InlineBubble,
 )
-from services.ingest.parser import build_book_record
-from services.character.service import _heuristic_character_candidates
+from backend.data.ingest.parser import build_book_record
+from backend.knowledge_base.character.service import _heuristic_character_candidates
 
 
 app = app_module.app

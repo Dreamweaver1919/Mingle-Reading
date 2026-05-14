@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.models import BookChunk
-from services.graph.models import TemporalContextGraph
-from services.graph.retrieval import search_temporal_graph
+from backend.common.models import BookChunk
+from backend.knowledge_base.graph.models import TemporalContextGraph
+from backend.knowledge_base.graph.retrieval import search_temporal_graph
 
 from .models import (
     Citation,

@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import ROOT_DIR, UPLOADS_DIR
-from backend.models import (
+from backend.common.config import ROOT_DIR, UPLOADS_DIR
+from backend.common.models import (
     CharacterChatRequest,
     CharacterProfileRequest,
     InlineBubbleRequest,
@@ -18,12 +18,12 @@ from backend.models import (
     SummaryRequest,
     UploadResponse,
 )
-from backend.storage import list_books, load_book, save_book
-from services.graph.builder import build_temporal_graph
-from services.graph.models import GraphQuery
-from services.graph.retrieval import TemporalGraphRetriever
-from services.graph.storage import load_graph, load_graph_metadata, save_graph
-from services.ingest.parser import (
+from backend.data.storage import list_books, load_book, save_book
+from backend.knowledge_base.graph.builder import build_temporal_graph
+from backend.knowledge_base.graph.models import GraphQuery
+from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever
+from backend.knowledge_base.graph.storage import load_graph, load_graph_metadata, save_graph
+from backend.data.ingest.parser import (
     SUPPORTED_UPLOAD_SUFFIXES,
     UploadTextExtractionError,
     UnsupportedUploadFormatError,
@@ -32,14 +32,14 @@ from services.ingest.parser import (
     read_uploaded_text,
     slugify,
 )
-from services.orchestration.service import OrchestrationService
-from services.character.service import (
+from backend.llm_memory.orchestration.service import OrchestrationService
+from backend.knowledge_base.character.service import (
     answer_as_character,
     generate_character_profile,
     generate_inline_bubbles,
     list_character_candidates,
 )
-from services.persona.persona_service import (
+from backend.llm_memory.persona.persona_service import (
     build_persona_prompt_preview,
     get_persona_agent,
     get_persona_kb_manifest,
@@ -49,8 +49,8 @@ from services.persona.persona_service import (
     PersonaAgentInvocationError,
     retrieve_persona_snippets,
 )
-from services.qa.answering import build_answer
-from services.summary.chapter_summary import summarize_chapter
+from backend.knowledge_base.qa.answering import build_answer
+from backend.llm_memory.summary.chapter_summary import summarize_chapter
 
 
 app = FastAPI(title="Muse Reading MVP", version="0.1.0")

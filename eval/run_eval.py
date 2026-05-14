@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.models import QuestionRequest
-from services.ingest.parser import build_book_record
-from services.qa.answering import build_answer
-from services.summary.chapter_summary import summarize_chapter
+from backend.common.models import QuestionRequest
+from backend.data.ingest.parser import build_book_record
+from backend.knowledge_base.qa.answering import build_answer
+from backend.llm_memory.summary.chapter_summary import summarize_chapter
 
 
 BENCHMARKS_DIR = ROOT / "benchmarks"

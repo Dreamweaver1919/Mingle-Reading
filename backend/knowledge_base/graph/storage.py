@@ -4,8 +4,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from backend.config import GRAPHS_DIR
-from services.graph.models import TemporalContextGraph
+from backend.common.config import GRAPHS_DIR
+from backend.knowledge_base.graph.models import TemporalContextGraph
 
 
 STORAGE_VERSION = "graph-store.v1"

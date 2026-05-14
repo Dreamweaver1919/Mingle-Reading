@@ -16,7 +16,7 @@ Muse Reading now supports local ingestion for `txt`, `pdf`, and `epub` uploads w
 ### Ingestion flow
 
 1. `POST /api/upload` receives the file
-2. `services/ingest/parser.py` detects the suffix and extracts readable text locally
+2. `backend/data/ingest/parser.py` detects the suffix and extracts readable text locally
 3. Extracted text is normalized
 4. The existing `build_book_record(...)` flow builds chapters and chunks
 5. The existing temporal graph builder runs on the resulting `BookRecord`

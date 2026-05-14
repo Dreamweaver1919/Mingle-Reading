@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from services.persona.persona_service import (
+from backend.llm_memory.persona.persona_service import (
     build_persona_prompt_preview,
     get_persona_agent,
     get_persona_kb_manifest,
@@ -8,7 +8,7 @@ from services.persona.persona_service import (
     resolve_persona_runtime,
     retrieve_persona_snippets,
 )
-from backend.models import PersonaPromptPreviewRequest, PersonaRAGQueryRequest
+from backend.common.models import PersonaPromptPreviewRequest, PersonaRAGQueryRequest
 
 
 def test_persona_agents_are_exposed_with_catalog_counts():

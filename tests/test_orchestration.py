@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from services.graph.builder import build_temporal_graph
-from services.ingest.parser import build_book_record
-from services.orchestration.models import ReadingProgress, SelectionAnchor, SelectionContext
-from services.orchestration.service import OrchestrationService
+from backend.knowledge_base.graph.builder import build_temporal_graph
+from backend.data.ingest.parser import build_book_record
+from backend.llm_memory.orchestration.models import ReadingProgress, SelectionAnchor, SelectionContext
+from backend.llm_memory.orchestration.service import OrchestrationService
 
 
 def demo_assets():
