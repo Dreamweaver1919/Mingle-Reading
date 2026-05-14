@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.common.config import ROOT_DIR, UPLOADS_DIR
+from backend.common.config import EXAMPLES_DIR, ROOT_DIR, UPLOADS_DIR
 from backend.common.models import (
     CharacterChatRequest,
     CharacterProfileRequest,
@@ -66,7 +66,7 @@ app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
 
 
 def ensure_demo_book_loaded() -> None:
-    demo_path = ROOT_DIR / "examples" / "muse_demo_book.txt"
+    demo_path = EXAMPLES_DIR / "muse_demo_book.txt"
     if not demo_path.exists():
         return
     title = demo_path.stem
@@ -79,7 +79,7 @@ def get_or_build_book(book_id: str):
     try:
         record = load_book(book_id)
     except FileNotFoundError:
-        demo_path = ROOT_DIR / "examples" / f"{book_id}.txt"
+        demo_path = EXAMPLES_DIR / f"{book_id}.txt"
         if not demo_path.exists():
             raise
         record = build_book_record(

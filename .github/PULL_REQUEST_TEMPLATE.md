@@ -6,7 +6,7 @@
 ## Verification
 
 - [ ] `pytest -q`
-- [ ] `python eval/run_eval.py`
+- [ ] `python backend/eval/run_eval.py`
 - [ ] manual smoke check if UI or API behavior changed
 
 ## Notes

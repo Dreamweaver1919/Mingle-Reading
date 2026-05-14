@@ -4,13 +4,13 @@ Thanks for helping improve Muse Reading. The current repository is a lightweight
 
 - `FastAPI` for the API layer
 - a static frontend in `frontend/`
-- local JSON files under `workspace_state/` for runtime storage
+- local JSON files under `backend/workspace_state/` for runtime storage
 
 ## Before You Start
 
 - Read the project overview in `README.md`.
 - Keep changes aligned with the existing MVP scope.
-- Do not commit generated files from `workspace_state/`.
+- Do not commit generated files from `backend/workspace_state/`.
 - Prefer small, reviewable pull requests.
 
 ## Local Setup
@@ -39,9 +39,9 @@ python main.py
 - `backend/safety/`: anti-spoiler safeguards
 - `backend/llm_memory/`: persona, orchestration, and summary generation
 - `frontend/`: static HTML/CSS/JS reader UI
-- `data/`, `schemas/`, `benchmarks/`, `eval/`: dataset, schema, and evaluation assets
-- `scripts/`: build and dataset utility scripts
-- `tests/`: pytest coverage for the MVP
+- `backend/assets/data/`, `backend/assets/schemas/`, `backend/benchmarks/`, `backend/eval/`: dataset, schema, and evaluation assets
+- `backend/scripts/`: build and dataset utility scripts
+- `backend/tests/`: pytest coverage for the MVP
 
 ## Development Expectations
 
@@ -56,7 +56,7 @@ Run these before opening a pull request:
 
 ```bash
 pytest -q
-python eval/run_eval.py
+python backend/eval/run_eval.py
 ```
 
 If your change touches dataset builders, also run the relevant script and confirm it produces valid JSON/JSONL output.

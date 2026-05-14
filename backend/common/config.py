@@ -3,11 +3,17 @@ from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-RUNTIME_DIR = ROOT_DIR / "workspace_state"
+BACKEND_DIR = ROOT_DIR / "backend"
+ASSETS_DIR = BACKEND_DIR / "assets"
+DATA_ASSETS_DIR = ASSETS_DIR / "data"
+EXAMPLES_DIR = ASSETS_DIR / "examples"
+SCHEMAS_DIR = ASSETS_DIR / "schemas"
+DOCS_DIR = BACKEND_DIR / "docs"
+RUNTIME_DIR = BACKEND_DIR / "workspace_state"
 BOOKS_DIR = RUNTIME_DIR / "books"
 UPLOADS_DIR = RUNTIME_DIR / "uploads"
 GRAPHS_DIR = RUNTIME_DIR / "graphs"
-PERSONA_KB_DIR = ROOT_DIR / "data" / "processed" / "personas" / "persona_kb"
+PERSONA_KB_DIR = DATA_ASSETS_DIR / "processed" / "personas" / "persona_kb"
 ENV_FILE = ROOT_DIR / ".env"
 
 
@@ -27,5 +33,17 @@ def _load_local_env() -> None:
 
 _load_local_env()
 
-for directory in (RUNTIME_DIR, BOOKS_DIR, UPLOADS_DIR, GRAPHS_DIR, PERSONA_KB_DIR):
+for directory in (
+    BACKEND_DIR,
+    ASSETS_DIR,
+    DATA_ASSETS_DIR,
+    EXAMPLES_DIR,
+    SCHEMAS_DIR,
+    DOCS_DIR,
+    RUNTIME_DIR,
+    BOOKS_DIR,
+    UPLOADS_DIR,
+    GRAPHS_DIR,
+    PERSONA_KB_DIR,
+):
     directory.mkdir(parents=True, exist_ok=True)

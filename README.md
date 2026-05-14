@@ -72,7 +72,7 @@ The repository follows a schema-first, metadata-first structure rather than bund
 ### Current Data Layout
 
 ```text
-data/
+backend/assets/data/
   raw/
     books/
     persona_sources/
@@ -126,7 +126,7 @@ uvicorn backend.api.app:app --reload
 
 Then open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-On startup, the app auto-loads the bundled demo book from [examples/muse_demo_book.txt](/C:/Users/21358/Desktop/MuseReading/examples/muse_demo_book.txt) if it exists.
+On startup, the app auto-loads the bundled demo book from [backend/assets/examples/muse_demo_book.txt](/C:/Users/21358/Desktop/MuseReading/backend/assets/examples/muse_demo_book.txt) if it exists.
 
 ## Frontend Usage
 
@@ -144,7 +144,7 @@ Current UI capabilities:
 
 Screenshot placeholder:
 
-- add future screenshots under `docs/` or a dedicated `screenshots/` folder before public release
+- add future screenshots under `backend/docs/` or a dedicated `screenshots/` folder before public release
 
 ## API Overview
 
@@ -176,16 +176,16 @@ Current endpoints exposed by [backend/api/app.py](/C:/Users/21358/Desktop/MuseRe
 ```text
 architecture/        interface and system design notes
 backend/             backend application, data, knowledge base, safety, and llm memory modules
-benchmarks/          benchmark fixtures for smoke evaluation
-data/                raw, processed, annotation, eval, and manifest assets
-docs/                architecture and data design documentation
+backend/benchmarks/          benchmark fixtures for smoke evaluation
+backend/assets/data/                raw, processed, annotation, eval, and manifest assets
+backend/docs/                architecture and data design documentation
 eval/                evaluation runners
-examples/            demo reading text
+backend/assets/examples/            demo reading text
 frontend/            static reader UI and browser-facing assets
-schemas/             JSON schema definitions
-scripts/             dataset and registry builders
-tests/               regression tests
-workspace_state/     local runtime artifacts such as saved books and graphs
+backend/assets/schemas/             JSON schema definitions
+backend/scripts/             dataset and registry builders
+backend/tests/               regression tests
+backend/workspace_state/     local runtime artifacts such as saved books and graphs
 ```
 
 ### Backend module layout
@@ -194,7 +194,7 @@ workspace_state/     local runtime artifacts such as saved books and graphs
 backend/
   api/               FastAPI endpoints and app wiring
   common/            shared config and Pydantic models
-  data/              ingestion and local persistence
+  backend/assets/data/              ingestion and local persistence
   knowledge_base/    graph, QA retrieval, and character modules
   safety/            anti-spoiler safeguards
   llm_memory/        persona, orchestration, and summary generation
@@ -207,7 +207,7 @@ The current repository includes a minimal but working evaluation scaffold.
 ### Run Benchmarks
 
 ```bash
-python eval/run_eval.py
+python backend/eval/run_eval.py
 ```
 
 ### Run Tests
@@ -256,8 +256,8 @@ This repository is structured to be safely open-sourced:
 
 ## Related Project Docs
 
-- [Architecture alignment](/C:/Users/21358/Desktop/MuseReading/docs/architecture_alignment.md)
-- [README architecture summary](/C:/Users/21358/Desktop/MuseReading/docs/readme_architecture_summary.md)
-- [Data design](/C:/Users/21358/Desktop/MuseReading/docs/data/muse_reading_data_design.md)
-- [Benchmarks README](/C:/Users/21358/Desktop/MuseReading/benchmarks/README.md)
-- [Data skeleton README](/C:/Users/21358/Desktop/MuseReading/data/README.md)
+- [Architecture alignment](/C:/Users/21358/Desktop/MuseReading/backend/docs/architecture_alignment.md)
+- [README architecture summary](/C:/Users/21358/Desktop/MuseReading/backend/docs/readme_architecture_summary.md)
+- [Data design](/C:/Users/21358/Desktop/MuseReading/backend/docs/data/muse_reading_data_design.md)
+- [Benchmarks README](/C:/Users/21358/Desktop/MuseReading/backend/benchmarks/README.md)
+- [Data skeleton README](/C:/Users/21358/Desktop/MuseReading/backend/assets/data/README.md)
