@@ -3,7 +3,7 @@
 Thanks for helping improve Muse Reading. The current repository is a lightweight Python MVP built with:
 
 - `FastAPI` for the API layer
-- a static frontend in `frontend/public`
+- a static frontend in `frontend/`
 - local JSON files under `workspace_state/` for runtime storage
 
 ## Before You Start
@@ -38,7 +38,7 @@ python main.py
 - `backend/knowledge_base/`: graph, QA retrieval, and character logic
 - `backend/safety/`: anti-spoiler safeguards
 - `backend/llm_memory/`: persona, orchestration, and summary generation
-- `frontend/public/`: static HTML/CSS/JS reader UI
+- `frontend/`: static HTML/CSS/JS reader UI
 - `data/`, `schemas/`, `benchmarks/`, `eval/`: dataset, schema, and evaluation assets
 - `scripts/`: build and dataset utility scripts
 - `tests/`: pytest coverage for the MVP

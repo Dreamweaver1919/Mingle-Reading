@@ -29,7 +29,7 @@ This repository is the current engineering scaffold for that idea. It is built a
 Muse Reading currently has four cooperating layers:
 
 1. `Frontend interaction layer`
-   The static web reader in [frontend/public](/C:/Users/21358/Desktop/MuseReading/frontend/public) handles upload, chapter navigation, paragraph selection, summary triggers, and question submission.
+   The static web reader in [frontend](/C:/Users/21358/Desktop/MuseReading/frontend) handles upload, chapter navigation, paragraph selection, summary triggers, and question submission.
 
 2. `Application and orchestration layer`
    The FastAPI app in [backend/api/app.py](/C:/Users/21358/Desktop/MuseReading/backend/api/app.py) exposes upload, book, persona, QA, orchestration, summary, and graph endpoints.
@@ -130,7 +130,7 @@ On startup, the app auto-loads the bundled demo book from [examples/muse_demo_bo
 
 ## Frontend Usage
 
-The reader UI is served directly by FastAPI from [frontend/public/index.html](/C:/Users/21358/Desktop/MuseReading/frontend/public/index.html).
+The reader UI is served directly by FastAPI from [frontend/index.html](/C:/Users/21358/Desktop/MuseReading/frontend/index.html).
 
 Current UI capabilities:
 
