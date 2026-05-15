@@ -18,12 +18,12 @@ from backend.common.models import (
     SummaryRequest,
     UploadResponse,
 )
-from backend.data.storage import list_books, load_book, save_book
+from backend.assets.data.data_processing_scripts.storage import list_books, load_book, save_book
 from backend.knowledge_base.graph.builder import build_temporal_graph
 from backend.knowledge_base.graph.models import GraphQuery
 from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever
 from backend.knowledge_base.graph.storage import load_graph, load_graph_metadata, save_graph
-from backend.data.ingest.parser import (
+from backend.assets.data.data_processing_scripts.ingest.parser import (
     SUPPORTED_UPLOAD_SUFFIXES,
     UploadTextExtractionError,
     UnsupportedUploadFormatError,

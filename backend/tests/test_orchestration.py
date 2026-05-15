@@ -2,7 +2,7 @@ from pathlib import Path
 
 from backend.common.config import EXAMPLES_DIR
 from backend.knowledge_base.graph.builder import build_temporal_graph
-from backend.data.ingest.parser import build_book_record
+from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record
 from backend.llm_memory.orchestration.models import ReadingProgress, SelectionAnchor, SelectionContext
 from backend.llm_memory.orchestration.service import OrchestrationService
 

@@ -6,8 +6,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import backend.eval.run_eval as eval_module
 from backend.common.models import QuestionRequest
 from backend.common.config import EXAMPLES_DIR
-from backend.data.ingest.parser import build_book_record
-from backend.data.ingest import parser as ingest_parser
+from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record
+from backend.assets.data.data_processing_scripts.ingest import parser as ingest_parser
 from backend.knowledge_base.qa import answering as qa_answering
 from backend.llm_memory.summary import chapter_summary as summary_module
 

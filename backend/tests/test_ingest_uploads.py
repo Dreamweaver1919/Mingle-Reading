@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from backend.data.ingest import parser as ingest_parser
-from backend.data.ingest.parser import build_book_record, build_book_record_from_upload
+from backend.assets.data.data_processing_scripts.ingest import parser as ingest_parser
+from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record, build_book_record_from_upload
 
 
 def build_test_epub_bytes() -> bytes:

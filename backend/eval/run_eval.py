@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
 
 from backend.common.config import EXAMPLES_DIR, SCHEMAS_DIR
 from backend.common.models import QuestionRequest
-from backend.data.ingest.parser import build_book_record
+from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record
 from backend.knowledge_base.qa.answering import build_answer
 from backend.llm_memory.summary.chapter_summary import summarize_chapter
 

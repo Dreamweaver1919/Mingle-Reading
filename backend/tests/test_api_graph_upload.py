@@ -6,7 +6,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from fastapi.testclient import TestClient
 
 import backend.api.app as app_module
-from backend.data.ingest import parser as ingest_parser
+from backend.assets.data.data_processing_scripts.ingest import parser as ingest_parser
 
 
 app = app_module.app

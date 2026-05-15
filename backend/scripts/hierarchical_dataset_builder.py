@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from backend.common.models import BookChunk, BookRecord
 from backend.knowledge_base.graph.builder import TemporalGraphBuilder
-from backend.data.ingest.parser import (
+from backend.assets.data.data_processing_scripts.ingest.parser import (
     extract_candidate_characters,
     normalize_text,
     score_spoiler_level,

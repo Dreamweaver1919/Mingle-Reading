@@ -10,7 +10,7 @@ from backend.common.models import (
     CharacterRelationship,
     InlineBubble,
 )
-from backend.data.ingest.parser import build_book_record
+from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record
 from backend.knowledge_base.character.service import _heuristic_character_candidates
 
 

@@ -5,7 +5,7 @@ from backend.knowledge_base.graph.builder import build_temporal_graph
 from backend.knowledge_base.graph.models import GraphQuery
 from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever, search_temporal_graph
 from backend.knowledge_base.graph.storage import load_graph, save_graph
-from backend.data.ingest.parser import build_book_record
+from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record
 
 
 def demo_graph():
