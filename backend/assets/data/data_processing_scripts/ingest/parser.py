@@ -5,6 +5,7 @@ import re
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
+from typing import Callable
 
 from backend.common.models import BookChunk, BookRecord
 
@@ -46,6 +47,9 @@ class UnsupportedUploadFormatError(ValueError):
 
 class UploadTextExtractionError(ValueError):
     """Raised when supported files do not yield readable text."""
+
+
+ProgressCallback = Callable[[dict], None]
 
 
 def slugify(value: str) -> str:
@@ -261,10 +265,13 @@ def _build_book_record_from_chapter_bodies(
     title: str,
     chapter_bodies: list[tuple[str, list[str]]],
     source_path: Path,
+    progress_callback: ProgressCallback | None = None,
 ) -> BookRecord:
     book_id = slugify(title)
     chunks: list[BookChunk] = []
     token_offset = 0
+    total_paragraphs = sum(len(paragraphs) for _, paragraphs in chapter_bodies)
+    processed_paragraphs = 0
     for chapter_index, (chapter_title, paragraphs) in enumerate(chapter_bodies, start=1):
         for paragraph_index, paragraph in enumerate(paragraphs, start=1):
             chunk_id = f"{book_id}-c{chapter_index:03d}-p{paragraph_index:03d}"
@@ -300,6 +307,24 @@ def _build_book_record_from_chapter_bodies(
                 )
             )
             token_offset += max(1, len(paragraph.split()))
+            processed_paragraphs += 1
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "stage": "construct-episodes",
+                        "title": "Constructing paragraph episodes",
+                        "message": f"已切分文段 {processed_paragraphs}/{total_paragraphs}，当前正在整理 chapter {chapter_index} paragraph {paragraph_index}。",
+                        "processed_snippets": processed_paragraphs,
+                        "total_snippets": total_paragraphs,
+                        "current_snippet_id": chunk_id,
+                        "current_chapter_index": chapter_index,
+                        "current_paragraph_index": paragraph_index,
+                        "details": {
+                            "chapter_title": chapter_title,
+                            "phase": "segment-and-episode-build",
+                        },
+                    }
+                )
     return BookRecord(
         book_id=book_id,
         title=title,
@@ -363,7 +388,12 @@ def _epub_section_to_chapter(section_text: str, chapter_index: int) -> tuple[str
     return chapter_title, cleaned_body
 
 
-def build_epub_book_record(title: str, raw_bytes: bytes, source_path: Path) -> BookRecord:
+def build_epub_book_record(
+    title: str,
+    raw_bytes: bytes,
+    source_path: Path,
+    progress_callback: ProgressCallback | None = None,
+) -> BookRecord:
     sections = extract_epub_sections(raw_bytes)
     chapter_bodies: list[tuple[str, list[str]]] = []
     started = False
@@ -385,19 +415,30 @@ def build_epub_book_record(title: str, raw_bytes: bytes, source_path: Path) -> B
 
     if not chapter_bodies:
         text = extract_epub_text(raw_bytes)
-        return build_book_record(title, text, source_path)
-    return _build_book_record_from_chapter_bodies(title, chapter_bodies, source_path)
+        return build_book_record(title, text, source_path, progress_callback=progress_callback)
+    return _build_book_record_from_chapter_bodies(title, chapter_bodies, source_path, progress_callback=progress_callback)
 
 
-def build_book_record_from_upload(title: str, filename: str, raw_bytes: bytes, source_path: Path) -> BookRecord:
+def build_book_record_from_upload(
+    title: str,
+    filename: str,
+    raw_bytes: bytes,
+    source_path: Path,
+    progress_callback: ProgressCallback | None = None,
+) -> BookRecord:
     suffix = Path(filename).suffix.lower()
     if suffix == ".epub":
-        return build_epub_book_record(title, raw_bytes, source_path)
+        return build_epub_book_record(title, raw_bytes, source_path, progress_callback=progress_callback)
     text = read_uploaded_text(filename, raw_bytes)
-    return build_book_record(title, text, source_path)
+    return build_book_record(title, text, source_path, progress_callback=progress_callback)
 
 
-def build_book_record(title: str, raw_text: str, source_path: Path) -> BookRecord:
+def build_book_record(
+    title: str,
+    raw_text: str,
+    source_path: Path,
+    progress_callback: ProgressCallback | None = None,
+) -> BookRecord:
     chapters = split_chapters(raw_text)
     chapter_bodies: list[tuple[str, list[str]]] = []
     for chapter_title, chapter_text in chapters:
@@ -406,4 +447,4 @@ def build_book_record(title: str, raw_text: str, source_path: Path) -> BookRecor
             paragraphs = paragraphs[1:]
         if paragraphs:
             chapter_bodies.append((chapter_title, paragraphs))
-    return _build_book_record_from_chapter_bodies(title, chapter_bodies, source_path)
+    return _build_book_record_from_chapter_bodies(title, chapter_bodies, source_path, progress_callback=progress_callback)

@@ -160,6 +160,25 @@ button {
   transform: translateY(0);
 }
 
+.pending-indicator-header {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.pending-title {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.pending-description {
+  margin: 10px 0 12px;
+  color: var(--ink-soft);
+  line-height: 1.65;
+}
+
 .pending-track {
   overflow: hidden;
   height: 9px;
@@ -168,15 +187,16 @@ button {
 }
 
 .pending-bar {
-  width: 32%;
+  width: 0%;
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(31, 106, 115, 0.18), rgba(31, 106, 115, 0.92), rgba(179, 108, 60, 0.9));
-  transform: translateX(-120%);
-  opacity: 0;
+  opacity: 0.95;
+  transition: width 240ms ease;
 }
 
-.pending-indicator.is-active .pending-bar {
+.pending-indicator.is-indeterminate .pending-bar {
+  width: 32%;
   opacity: 1;
   animation: pending-slide 1.15s ease-in-out infinite;
 }
@@ -185,6 +205,25 @@ button {
   0% { transform: translateX(-120%); }
   100% { transform: translateX(360%); }
 }
+
+.pending-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.pending-percent {
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.pending-step-caption {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 
 .workspace {
   display: grid;

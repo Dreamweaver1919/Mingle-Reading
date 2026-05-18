@@ -33,11 +33,18 @@ class TemporalGraphRetriever:
     """Retrieve progress-aware temporal context with graph filters and browse support."""
 
     def retrieve(self, graph: TemporalContextGraph, query: GraphQuery) -> GraphRetrievalResult:
-        visible_episode_ids = graph.visible_episode_ids(query.max_chapter)
+        visible_episode_ids = graph.visible_episode_ids(query.max_chapter, query.max_paragraph)
         visible_entity_ids = {
             entity_id
             for entity_id, entity in graph.entities.items()
-            if (query.max_chapter is None or entity.first_seen_chapter <= query.max_chapter)
+            if (
+                query.max_chapter is None
+                or entity.first_seen_chapter < query.max_chapter
+                or (
+                    entity.first_seen_chapter == query.max_chapter
+                    and (query.max_paragraph is None or entity.first_seen_paragraph <= query.max_paragraph)
+                )
+            )
             and (query.min_chapter is None or entity.last_seen_chapter >= query.min_chapter)
         }
         query_tokens = _tokenize(query.query)
@@ -90,10 +97,14 @@ class TemporalGraphRetriever:
             visible_entity_count=len(visible_entity_ids),
             applied_filters={
                 "max_chapter": query.max_chapter,
+                "max_paragraph": query.max_paragraph,
                 "min_chapter": query.min_chapter,
+                "min_paragraph": query.min_paragraph,
                 "entity_names": query.entity_names,
                 "entity_types": query.entity_types,
                 "relation_types": query.relation_types,
+                "state_families": query.state_families,
+                "relation_statuses": query.relation_statuses,
                 "tags": query.tags,
                 "node_types": query.node_types,
                 "metadata_filters": query.metadata_filters,
@@ -116,6 +127,13 @@ class TemporalGraphRetriever:
         for episode_id in visible_episode_ids:
             episode = graph.episodes[episode_id]
             if query.min_chapter is not None and episode.chapter_index < query.min_chapter:
+                continue
+            if (
+                query.min_paragraph is not None
+                and query.min_chapter is not None
+                and episode.chapter_index == query.min_chapter
+                and episode.paragraph_index < query.min_paragraph
+            ):
                 continue
             if requested_tags and not requested_tags.intersection(episode.tags):
                 continue
@@ -153,11 +171,13 @@ class TemporalGraphRetriever:
                     chapter_index=episode.chapter_index,
                     payload={
                         "chunk_id": episode.chunk_id,
-                        "entities": episode.entities,
+                        "entities": episode.entity_ids,
                         "tags": episode.tags,
                         "community_ids": episode.community_ids,
                         "saga_ids": episode.saga_ids,
                         "spoiler_level": episode.spoiler_level,
+                        "paragraph_id": episode.paragraph_index,
+                        "reference_time": episode.reference_time,
                     },
                     provenance=episode.provenance,
                 )
@@ -195,6 +215,8 @@ class TemporalGraphRetriever:
                         "title": chapter.title,
                         "entity_ids": chapter.entity_ids,
                         "relation_ids": chapter.relation_ids,
+                        "active_relation_ids": chapter.active_relation_ids,
+                        "invalidated_relation_ids": chapter.invalidated_relation_ids,
                         "paragraph_count": chapter.paragraph_count,
                     },
                     provenance=chapter.provenance[:3],
@@ -236,12 +258,13 @@ class TemporalGraphRetriever:
                     reason="entity_name+episode_overlap",
                     chapter_index=entity.first_seen_chapter,
                     payload={
-                        "canonical_name": entity.canonical_name,
-                        "entity_type": entity.entity_type,
-                        "mention_count": entity.mention_count,
-                        "episode_ids": entity.episode_ids[:6],
-                        "neighbor_count": len(graph.entity_neighbors(entity.entity_id)),
-                    },
+                    "canonical_name": entity.canonical_name,
+                    "entity_type": entity.entity_type,
+                    "mention_count": entity.mention_count,
+                    "summary": entity.summary,
+                    "episode_ids": entity.episode_ids[:6],
+                    "neighbor_count": len(graph.entity_neighbors(entity.entity_id)),
+                },
                     provenance=[
                         graph.episodes[episode_id].provenance[0]
                         for episode_id in entity.episode_ids[:3]
@@ -264,28 +287,40 @@ class TemporalGraphRetriever:
         visible_episodes = set(visible_episode_ids)
         requested_entities = {value.lower() for value in query.entity_names}
         allowed_relation_types = set(query.relation_types)
+        allowed_state_families = set(query.state_families)
+        allowed_statuses = set(query.relation_statuses)
         for edge in graph.relations.values():
             if edge.weight < query.min_relation_weight:
                 continue
+            if allowed_statuses and edge.status not in allowed_statuses:
+                continue
+            if not query.include_invalidated_relations and edge.status == "invalidated":
+                continue
             if allowed_relation_types and edge.relation_type not in allowed_relation_types:
+                continue
+            if allowed_state_families and edge.state_family not in allowed_state_families:
                 continue
             if edge.source_entity_id not in visible_entity_ids or edge.target_entity_id not in visible_entity_ids:
                 continue
-            if query.max_chapter is not None and edge.validity_start_chapter > query.max_chapter:
-                continue
-            if query.min_chapter is not None and (edge.validity_end_chapter or 0) < query.min_chapter:
+            if not edge.overlaps_window(
+                min_chapter=query.min_chapter,
+                max_chapter=query.max_chapter,
+                max_paragraph=query.max_paragraph,
+            ):
                 continue
             if not visible_episodes.intersection(edge.episode_ids):
                 continue
 
             source_name = graph.entities[edge.source_entity_id].canonical_name
             target_name = graph.entities[edge.target_entity_id].canonical_name
-            name_text = f"{source_name} {target_name} {edge.relation_type}"
+            name_text = f"{source_name} {target_name} {edge.relation_type} {edge.fact}"
             score = _text_score(query_tokens, name_text) + min(edge.weight, 3.0) * 0.2
             if requested_entities and {source_name.lower(), target_name.lower()}.intersection(requested_entities):
                 score += 0.8
             if supporting_episode_ids.intersection(edge.episode_ids):
                 score += 0.6
+            if edge.status == "active":
+                score += 0.2
             if score <= 0:
                 continue
             hits.append(
@@ -299,10 +334,17 @@ class TemporalGraphRetriever:
                         "source_entity_id": edge.source_entity_id,
                         "target_entity_id": edge.target_entity_id,
                         "relation_type": edge.relation_type,
-                        "validity_start_chapter": edge.validity_start_chapter,
-                        "validity_end_chapter": edge.validity_end_chapter,
+                        "state_family": edge.state_family,
+                        "fact": edge.fact,
+                        "status": edge.status,
+                        "valid_at_chapter": edge.valid_at_chapter,
+                        "valid_at_paragraph": edge.valid_at_paragraph,
+                        "invalid_at_chapter": edge.invalid_at_chapter,
+                        "invalid_at_paragraph": edge.invalid_at_paragraph,
+                        "invalidated_by_edge_id": edge.invalidated_by_edge_id,
                         "episode_ids": edge.episode_ids,
                         "weight": edge.weight,
+                        "reference_time": edge.reference_time,
                     },
                     provenance=edge.provenance[:3],
                 )
@@ -325,7 +367,7 @@ class TemporalGraphRetriever:
             if not supporting_episode_ids.intersection(community.episode_ids):
                 continue
             label_score = _text_score(query_tokens, community.label)
-            score = label_score + 0.3 * min(len(community.entity_ids), 4)
+            score = label_score + _text_score(query_tokens, community.summary) + 0.3 * min(len(community.entity_ids), 4)
             hits.append(
                 GraphHit(
                     hit_id=community.community_id,
@@ -335,8 +377,10 @@ class TemporalGraphRetriever:
                     chapter_index=community.chapter_start,
                     payload={
                         "label": community.label,
+                        "summary": community.summary,
                         "entity_ids": community.entity_ids,
                         "episode_ids": community.episode_ids[:6],
+                        "relation_ids": community.relation_ids[:6],
                     },
                     provenance=community.provenance[:3],
                 )
@@ -374,6 +418,7 @@ class TemporalGraphRetriever:
                         "chapter_start": saga.chapter_start,
                         "chapter_end": saga.chapter_end,
                         "entity_ids": saga.entity_ids,
+                        "relation_ids": saga.relation_ids[:6],
                     },
                     provenance=saga.provenance[:3],
                 )
@@ -385,10 +430,11 @@ def search_temporal_graph(
     graph: TemporalContextGraph,
     query: str,
     max_chapter: int,
+    max_paragraph: int | None = None,
     top_k: int = 5,
 ) -> list[GraphHit]:
     result = TemporalGraphRetriever().retrieve(
         graph,
-        GraphQuery(query=query, max_chapter=max_chapter, top_k=top_k),
+        GraphQuery(query=query, max_chapter=max_chapter, max_paragraph=max_paragraph, top_k=top_k),
     )
     return result.hits

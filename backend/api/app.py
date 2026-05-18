@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Thread
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.upload_jobs import upload_job_registry
+from backend.assets.data.data_processing_scripts.ingest.parser import (
+    SUPPORTED_UPLOAD_SUFFIXES,
+    UploadTextExtractionError,
+    UnsupportedUploadFormatError,
+    build_book_record,
+    build_book_record_from_upload,
+    read_uploaded_text,
+    slugify,
+)
+from backend.assets.data.data_processing_scripts.storage import list_books, load_book, save_book
 from backend.common.config import EXAMPLES_DIR, ROOT_DIR, UPLOADS_DIR
 from backend.common.models import (
     CharacterChatRequest,
@@ -18,38 +30,28 @@ from backend.common.models import (
     SummaryRequest,
     UploadResponse,
 )
-from backend.assets.data.data_processing_scripts.storage import list_books, load_book, save_book
-from backend.knowledge_base.graph.builder import build_temporal_graph
-from backend.knowledge_base.graph.models import GraphQuery
-from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever
-from backend.knowledge_base.graph.storage import load_graph, load_graph_metadata, save_graph
-from backend.assets.data.data_processing_scripts.ingest.parser import (
-    SUPPORTED_UPLOAD_SUFFIXES,
-    UploadTextExtractionError,
-    UnsupportedUploadFormatError,
-    build_book_record,
-    build_book_record_from_upload,
-    read_uploaded_text,
-    slugify,
-)
-from backend.llm_memory.orchestration.service import OrchestrationService
 from backend.knowledge_base.character.service import (
     answer_as_character,
     generate_character_profile,
     generate_inline_bubbles,
     list_character_candidates,
 )
+from backend.knowledge_base.graph.builder import TemporalGraphBuilder, build_temporal_graph
+from backend.knowledge_base.graph.models import GraphQuery
+from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever
+from backend.knowledge_base.graph.storage import load_graph, load_graph_metadata, save_graph
+from backend.knowledge_base.qa.answering import build_answer
+from backend.llm_memory.orchestration.service import OrchestrationService
 from backend.llm_memory.persona.persona_service import (
+    PersonaAgentConfigurationError,
+    PersonaAgentInvocationError,
     build_persona_prompt_preview,
     get_persona_agent,
     get_persona_kb_manifest,
     list_persona_agents,
     list_personas,
-    PersonaAgentConfigurationError,
-    PersonaAgentInvocationError,
     retrieve_persona_snippets,
 )
-from backend.knowledge_base.qa.answering import build_answer
 from backend.llm_memory.summary.chapter_summary import summarize_chapter
 
 
@@ -63,6 +65,155 @@ app.add_middleware(
 
 frontend_dir = ROOT_DIR / "frontend"
 app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+
+
+def _upload_stage_percent(stage: str) -> int:
+    mapping = {
+        "queued": 0,
+        "extract-source-text": 5,
+        "segment-chapters": 12,
+        "construct-episodes": 22,
+        "graph-episode-start": 32,
+        "llm-request-dispatched": 42,
+        "llm-response-received": 54,
+        "llm-request-failed": 54,
+        "graph-episode-complete": 64,
+        "graph-community-build": 74,
+        "graph-saga-build": 80,
+        "graph-timeline-build": 86,
+        "graph-build-finished": 90,
+        "persist-book-record": 94,
+        "persist-graph-snapshot": 97,
+        "finalize-upload": 99,
+        "completed": 100,
+        "failed": 100,
+    }
+    return mapping.get(stage, 0)
+
+
+def _update_upload_job(job_id: str, **fields):
+    stage = fields.get("stage")
+    if stage and "percent" not in fields:
+        fields["percent"] = _upload_stage_percent(stage)
+    upload_job_registry.update(job_id, **fields)
+
+
+def _process_upload_job(job_id: str, *, original_name: str, suffix: str, raw_bytes: bytes) -> None:
+    _update_upload_job(
+        job_id,
+        status="running",
+        stage="extract-source-text",
+        title="Extracting source text",
+        message=f"Reading uploaded file {original_name} and extracting source text.",
+    )
+    try:
+        text = read_uploaded_text(original_name, raw_bytes)
+        title = Path(original_name).stem
+        safe_name = slugify(title)
+        upload_path = UPLOADS_DIR / f"{safe_name}{suffix}"
+        if suffix in SUPPORTED_UPLOAD_SUFFIXES - {".txt"}:
+            upload_path.write_bytes(raw_bytes)
+        else:
+            upload_path.write_text(text, encoding="utf-8")
+
+        _update_upload_job(
+            job_id,
+            stage="segment-chapters",
+            title="Segmenting chapters and paragraphs",
+            message="Segmenting the uploaded text into chapter and paragraph episodes.",
+            book_title=title,
+        )
+
+        def parser_progress(payload: dict) -> None:
+            _update_upload_job(job_id, **payload)
+
+        record = build_book_record_from_upload(
+            title=title,
+            filename=original_name,
+            raw_bytes=raw_bytes if suffix != ".txt" else text.encode("utf-8"),
+            source_path=upload_path,
+            progress_callback=parser_progress,
+        )
+        _update_upload_job(
+            job_id,
+            book_id=record.book_id,
+            book_title=record.title,
+            chunk_count=len(record.chunks),
+            chapter_count=record.chapter_count,
+            total_snippets=len(record.chunks),
+        )
+
+        def graph_progress(payload: dict) -> None:
+            _update_upload_job(job_id, **payload)
+
+        graph = TemporalGraphBuilder(progress_callback=graph_progress, strict_llm_extraction=True).build(record)
+
+        _update_upload_job(
+            job_id,
+            stage="persist-book-record",
+            title="Persisting book record",
+            message="Persisting the parsed book record.",
+            processed_snippets=len(record.chunks),
+            total_snippets=len(record.chunks),
+        )
+        save_book(record)
+
+        _update_upload_job(
+            job_id,
+            stage="persist-graph-snapshot",
+            title="Persisting graph snapshot",
+            message="Persisting the temporal graph snapshot, including relations, communities, and sagas.",
+            processed_snippets=len(record.chunks),
+            total_snippets=len(record.chunks),
+            details={
+                "entity_count": len(graph.entities),
+                "relation_count": len(graph.relations),
+                "community_count": len(graph.communities),
+                "saga_count": len(graph.sagas),
+            },
+        )
+        save_graph(graph)
+
+        _update_upload_job(
+            job_id,
+            status="completed",
+            stage="completed",
+            title="Temporal graph ready",
+            message=f"Temporal graph ready for {record.title}.",
+            processed_snippets=len(record.chunks),
+            total_snippets=len(record.chunks),
+            book_id=record.book_id,
+            book_title=record.title,
+            chunk_count=len(record.chunks),
+            chapter_count=record.chapter_count,
+        )
+    except UnsupportedUploadFormatError as exc:
+        _update_upload_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            title="Upload failed",
+            message=str(exc),
+            error=str(exc),
+        )
+    except UploadTextExtractionError as exc:
+        _update_upload_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            title="Text extraction failed",
+            message=str(exc),
+            error=str(exc),
+        )
+    except Exception as exc:
+        _update_upload_job(
+            job_id,
+            status="failed",
+            stage="failed",
+            title="Temporal graph build failed",
+            message=f"Temporal graph build failed: {exc}",
+            error=str(exc),
+        )
 
 
 def ensure_demo_book_loaded() -> None:
@@ -317,20 +468,49 @@ async def upload_book(file: UploadFile = File(...)) -> UploadResponse:
         upload_path.write_bytes(raw_bytes)
     else:
         upload_path.write_text(text, encoding="utf-8")
+
     record = build_book_record_from_upload(
         title=title,
         filename=original_name,
         raw_bytes=raw_bytes if suffix != ".txt" else text.encode("utf-8"),
         source_path=upload_path,
     )
+    graph = TemporalGraphBuilder(strict_llm_extraction=True).build(record)
     save_book(record)
-    save_graph(build_temporal_graph(record))
+    save_graph(graph)
     return UploadResponse(
         book_id=record.book_id,
         title=record.title,
         chapter_count=record.chapter_count,
         chunk_count=len(record.chunks),
     )
+
+
+@app.post("/api/upload-jobs")
+async def create_upload_job(file: UploadFile = File(...)):
+    original_name = file.filename or "uploaded.txt"
+    suffix = Path(original_name).suffix.lower() or ".txt"
+    if suffix not in SUPPORTED_UPLOAD_SUFFIXES:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported upload format '{suffix or 'unknown'}'. Supported formats: txt, pdf, epub.",
+        )
+    raw_bytes = await file.read()
+    job = upload_job_registry.create()
+    Thread(
+        target=_process_upload_job,
+        kwargs={"job_id": job.job_id, "original_name": original_name, "suffix": suffix, "raw_bytes": raw_bytes},
+        daemon=True,
+    ).start()
+    return job.to_dict()
+
+
+@app.get("/api/upload-jobs/{job_id}")
+def upload_job_status(job_id: str):
+    job = upload_job_registry.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="upload_job_not_found")
+    return job.to_dict()
 
 
 @app.post("/api/qa")

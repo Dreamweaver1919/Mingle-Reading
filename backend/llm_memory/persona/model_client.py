@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from typing import Any
 from urllib import error, request
 
@@ -41,6 +42,7 @@ def invoke_openai_compatible_messages(
     temperature: float = 0.4,
     max_tokens: int = 700,
     timeout_seconds: int = 90,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     endpoint = _normalize_chat_completions_url(base_url)
     payload = {
@@ -49,6 +51,8 @@ def invoke_openai_compatible_messages(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
+    if response_format is not None:
+        payload["response_format"] = response_format
     body = json.dumps(payload).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -63,6 +67,8 @@ def invoke_openai_compatible_messages(
         raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
     except error.URLError as exc:
         raise RuntimeError(f"network error: {exc.reason}") from exc
+    except (TimeoutError, socket.timeout) as exc:
+        raise RuntimeError(f"network timeout: {exc}") from exc
     payload = json.loads(raw)
     return _extract_content(payload)
 
@@ -77,6 +83,7 @@ def invoke_openai_compatible_chat(
     temperature: float = 0.4,
     max_tokens: int = 700,
     timeout_seconds: int = 90,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     return invoke_openai_compatible_messages(
         api_key=api_key,
@@ -89,4 +96,5 @@ def invoke_openai_compatible_chat(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout_seconds=timeout_seconds,
+        response_format=response_format,
     )

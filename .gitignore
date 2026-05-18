@@ -46,3 +46,6 @@ Muse Reading_数据集构建方案与评测基准设计.pptx
 数据集构建与模型评测.pptx
 渐进式节拍记忆系统(PBM)数据集介绍 (1)(1).pptx
 _doc.xml
+
+# Local uploaded source books used for debugging
+backend/assets/data/raw/books/*.epub

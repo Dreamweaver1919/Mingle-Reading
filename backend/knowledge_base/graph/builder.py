@@ -3,9 +3,12 @@ from __future__ import annotations
 import itertools
 import re
 from collections import Counter, defaultdict
+from datetime import UTC, datetime
+from typing import Callable, Iterable
 
 from backend.common.models import BookChunk, BookRecord
 
+from . import llm_extraction
 from .models import (
     ChapterNode,
     ChapterTimelineEntry,
@@ -13,15 +16,27 @@ from .models import (
     EntityNode,
     EpisodeNode,
     GraphProvenance,
+    RelationDirectionality,
     RelationEdge,
+    RelationStatus,
     SagaNode,
     TemporalContextGraph,
 )
 
 
-LOCATION_HINTS = {"river", "city", "village", "town", "road", "street", "house", "school", "room"}
+LOCATION_HINTS = {"river", "city", "village", "town", "road", "street", "house", "school", "room", "library", "harbor"}
 GROUP_HINTS = {"family", "army", "crowd", "people", "villagers", "class"}
-CONCEPT_HINTS = {"freedom", "love", "fear", "truth", "memory", "dream", "justice"}
+CONCEPT_HINTS = {"freedom", "love", "fear", "truth", "memory", "dream", "justice", "loneliness"}
+STOP_ENTITY_NAMES = {"chapter", "section"}
+
+LOCATION_PREPOSITIONS = (" in ", " at ", " inside ", " within ", " near ", " from ", " to ")
+SPEECH_TERMS = ("said", "asked", "replied", "told", "answered", "whispered", "shouted")
+CONFLICT_TERMS = ("fought", "killed", "against", "war", "fight", "attacked", "argued", "blamed")
+AFFECTION_TERMS = ("loved", "cared for", "trusted", "admired", "protected", "helped")
+KINSHIP_TERMS = ("mother", "father", "brother", "sister", "son", "daughter", "husband", "wife", "family")
+
+STATEFUL_FAMILIES = {"location", "membership", "status"}
+UNDIRECTED_RELATION_TYPES = {"CO_PRESENT", "SPOKE_WITH", "CONFLICTS_WITH", "FAMILY_OF"}
 
 
 def _slugify(value: str) -> str:
@@ -37,48 +52,19 @@ def _excerpt(text: str, limit: int = 180) -> str:
     return f"{compact[: limit - 3]}..."
 
 
-def _extract_entity_names(chunk: BookChunk) -> list[str]:
-    names: list[str] = []
-    raw_names = list(chunk.candidate_characters)
+def _chapter_title(chunk: BookChunk) -> str:
     metadata = chunk.metadata or {}
-
-    for key in ("characters_present", "locations_present", "concepts_present"):
-        values = metadata.get(key, [])
-        if isinstance(values, list):
-            raw_names.extend(name for name in values if isinstance(name, str))
-
-    if not raw_names:
-        raw_names.extend(re.findall(r"\b[A-Z][a-z]{2,}\b", chunk.text))
-
-    for name in raw_names:
-        normalized = " ".join(name.strip().split())
-        if not normalized:
-            continue
-        if normalized not in names:
-            names.append(normalized)
-    return names
-
-
-def _infer_entity_type(name: str, chunk: BookChunk) -> str:
-    lowered = name.lower()
-    metadata = chunk.metadata or {}
-    if name in metadata.get("locations_present", []):
-        return "location"
-    if name in metadata.get("concepts_present", []):
-        return "concept"
-    if any(hint in lowered for hint in LOCATION_HINTS):
-        return "location"
-    if any(hint in lowered for hint in GROUP_HINTS):
-        return "group"
-    if any(hint in lowered for hint in CONCEPT_HINTS):
-        return "theme"
-    return "character"
+    title = metadata.get("chapter_title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    return chunk.chapter_id.replace("_", " ").title()
 
 
 def _build_provenance(chunk: BookChunk, source: str, extra_metadata: dict | None = None) -> GraphProvenance:
     metadata = dict(extra_metadata or {})
     metadata.setdefault("spoiler_guard", chunk.spoiler_guard)
     metadata.setdefault("chunk_level", chunk.chunk_level)
+    metadata.setdefault("section_id", chunk.section_id)
     return GraphProvenance(
         chunk_id=chunk.chunk_id,
         book_id=chunk.book_id,
@@ -92,27 +78,136 @@ def _build_provenance(chunk: BookChunk, source: str, extra_metadata: dict | None
     )
 
 
-def _relation_type(chunk: BookChunk) -> str:
-    lowered = chunk.text.lower()
-    if any(term in lowered for term in ("said", "asked", "replied", "told", "问", "说", "回答")):
-        return "co_present_dialogue"
-    if any(term in lowered for term in ("fought", "killed", "against", "war", "fight", "争", "战", "杀")):
-        return "co_present_conflict"
-    return "co_present"
+def _normalize_entity_name(name: str) -> str:
+    return " ".join(name.strip().split())
 
 
-def _chapter_title(chunk: BookChunk) -> str:
+def _extract_entity_mentions(chunk: BookChunk) -> list[tuple[str, str]]:
+    mentions: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     metadata = chunk.metadata or {}
-    title = metadata.get("chapter_title")
-    if isinstance(title, str) and title.strip():
-        return title.strip()
-    return chunk.chapter_id.replace("_", " ").title()
+
+    sources: list[tuple[str, Iterable[str]]] = [
+        ("character", chunk.candidate_characters),
+        ("character", metadata.get("characters_present", [])),
+        ("location", metadata.get("locations_present", [])),
+        ("concept", metadata.get("concepts_present", [])),
+    ]
+    if not any(values for _, values in sources):
+        sources.append(("character", re.findall(r"\b[A-Z][a-z]{2,}\b", chunk.text)))
+
+    for entity_type, values in sources:
+        for raw_name in values:
+            if not isinstance(raw_name, str):
+                continue
+            name = _normalize_entity_name(raw_name)
+            if not name or name.lower() in STOP_ENTITY_NAMES:
+                continue
+            mention = (name, entity_type)
+            if mention in seen:
+                continue
+            seen.add(mention)
+            mentions.append(mention)
+    return mentions
+
+
+def _infer_entity_type(name: str, declared_type: str, chunk: BookChunk) -> str:
+    if declared_type in {"character", "location", "concept", "group"}:
+        return declared_type
+    lowered = name.lower()
+    if any(hint in lowered for hint in LOCATION_HINTS):
+        return "location"
+    if any(hint in lowered for hint in GROUP_HINTS):
+        return "group"
+    if any(hint in lowered for hint in CONCEPT_HINTS):
+        return "theme"
+    return "character"
+
+
+def _entity_aliases(name: str) -> list[str]:
+    aliases = {name}
+    parts = name.split()
+    if len(parts) > 1:
+        aliases.add(parts[-1])
+    return sorted(alias for alias in aliases if alias)
+
+
+def _split_sentences(text: str) -> list[str]:
+    raw_parts = re.split(r"(?<=[\.\!\?。！？])\s+|\n+", text)
+    return [" ".join(part.split()) for part in raw_parts if part and part.strip()]
+
+
+def _match_entities_in_sentence(sentence: str, entity_nodes: list[EntityNode]) -> list[EntityNode]:
+    lowered = sentence.lower()
+    matched: list[EntityNode] = []
+    for entity in entity_nodes:
+        candidate_forms = {entity.canonical_name.lower(), *(alias.lower() for alias in entity.aliases)}
+        if any(form and form in lowered for form in candidate_forms):
+            matched.append(entity)
+    return matched
+
+
+def _relation_from_sentence(sentence: str, source: EntityNode, target: EntityNode) -> tuple[str, str, RelationDirectionality]:
+    lowered = sentence.lower()
+    if source.entity_type == "character" and target.entity_type == "location":
+        if any(token in lowered for token in LOCATION_PREPOSITIONS):
+            return "LOCATED_IN", "location", "directed"
+    if source.entity_type == "character" and target.entity_type == "group":
+        return "MEMBER_OF", "membership", "directed"
+    if any(term in lowered for term in SPEECH_TERMS):
+        return "SPOKE_WITH", "interaction", "undirected"
+    if any(term in lowered for term in CONFLICT_TERMS):
+        return "CONFLICTS_WITH", "interaction", "undirected"
+    if any(term in lowered for term in AFFECTION_TERMS):
+        return "CARES_ABOUT", "sentiment", "directed"
+    if any(term in lowered for term in KINSHIP_TERMS):
+        return "FAMILY_OF", "identity", "undirected"
+    return "CO_PRESENT", "context", "undirected"
+
+
+def _fact_signature(
+    relation_type: str,
+    state_family: str,
+    source_entity_id: str,
+    target_entity_id: str,
+    directionality: RelationDirectionality,
+) -> str:
+    if directionality == "undirected":
+        pair = sorted((source_entity_id, target_entity_id))
+        return f"{relation_type}|{state_family}|{pair[0]}|{pair[1]}"
+    return f"{relation_type}|{state_family}|{source_entity_id}|{target_entity_id}"
+
+
+def _state_key(state_family: str, source_entity_id: str, directionality: RelationDirectionality, target_entity_id: str) -> str:
+    if state_family not in STATEFUL_FAMILIES:
+        return ""
+    if directionality == "undirected":
+        ordered = sorted((source_entity_id, target_entity_id))
+        return f"{state_family}|{ordered[0]}|{ordered[1]}"
+    return f"{state_family}|{source_entity_id}"
 
 
 class TemporalGraphBuilder:
-    """Build a richer local temporal context graph from chunked book text."""
+    """Build a Graphiti-style temporal knowledge graph from paragraph episodes."""
+
+    def __init__(
+        self,
+        extractor_runtime: llm_extraction.GraphExtractorRuntime | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
+        strict_llm_extraction: bool = False,
+    ) -> None:
+        self.extractor_runtime = extractor_runtime or llm_extraction.resolve_graph_extractor_runtime()
+        self.progress_callback = progress_callback
+        self.strict_llm_extraction = strict_llm_extraction
 
     def build(self, book: BookRecord) -> TemporalContextGraph:
+        if self.strict_llm_extraction and self.extractor_runtime is None:
+            raise RuntimeError(
+                "strict Graphiti extraction requires GRAPHITI_EXTRACTOR_API_KEY, "
+                "GRAPHITI_EXTRACTOR_BASE_URL and GRAPHITI_EXTRACTOR_MODEL_NAME."
+            )
+        now = datetime.now(UTC).isoformat()
+        extraction_backend = "llm-assisted-resolution" if self.extractor_runtime is not None else "heuristic-resolution"
         graph = TemporalContextGraph(
             graph_id=f"graph::{book.book_id}",
             book_id=book.book_id,
@@ -122,51 +217,46 @@ class TemporalGraphBuilder:
                 "chapter_count": book.chapter_count,
                 "chunk_count": len(book.chunks),
                 "builder": "TemporalGraphBuilder",
-                "entity_extraction": "heuristic",
+                "graph_style": "graphiti-inspired",
+                "entity_extraction": extraction_backend,
+                "fact_extraction": extraction_backend,
+                "created_at": now,
             },
         )
 
-        entity_chapters: dict[str, set[int]] = defaultdict(set)
-        entity_provenance: dict[str, list[GraphProvenance]] = defaultdict(list)
-        entity_episode_ids: dict[str, list[str]] = defaultdict(list)
+        entity_id_by_alias: dict[str, str] = {}
+        active_relation_by_signature: dict[str, str] = {}
+        active_state_relation_by_key: dict[str, str] = {}
+        relation_version_counter: Counter[str] = Counter()
+
         chapter_entities: dict[int, set[str]] = defaultdict(set)
         chapter_episode_ids: dict[int, list[str]] = defaultdict(list)
         chapter_relation_ids: dict[int, set[str]] = defaultdict(set)
+        chapter_active_relation_ids: dict[int, set[str]] = defaultdict(set)
+        chapter_invalidated_relation_ids: dict[int, set[str]] = defaultdict(set)
         chapter_provenance: dict[int, list[GraphProvenance]] = defaultdict(list)
         chapter_paragraph_count: Counter[int] = Counter()
 
-        for chunk in sorted(book.chunks, key=lambda item: (item.chapter_index, item.paragraph_index)):
-            episode_id = f"episode_{_slugify(chunk.chunk_id)}"
-            provenance = [_build_provenance(chunk, "episode")]
-            entity_names = _extract_entity_names(chunk)
-            entity_ids: list[str] = []
+        sorted_chunks = sorted(book.chunks, key=lambda item: (item.chapter_index, item.paragraph_index))
+        total_chunks = len(sorted_chunks)
+        previous_episode_id: str | None = None
 
-            episode = EpisodeNode(
-                episode_id=episode_id,
-                book_id=book.book_id,
-                chunk_id=chunk.chunk_id,
-                chapter_id=chunk.chapter_id,
-                chapter_index=chunk.chapter_index,
-                paragraph_id=chunk.paragraph_id,
-                paragraph_index=chunk.paragraph_index,
-                text=chunk.text,
-                spoiler_level=chunk.spoiler_level,
-                tags=list(chunk.tags),
-                metadata={
-                    "token_offset": chunk.token_offset,
-                    "position": chunk.position,
-                    "section_id": chunk.section_id,
-                    "paragraph_start_id": chunk.paragraph_start_id,
-                    "paragraph_end_id": chunk.paragraph_end_id,
-                    **chunk.metadata,
-                },
-                provenance=provenance,
+        for episode_index, chunk in enumerate(sorted_chunks, start=1):
+            self._emit_progress(
+                stage="graph-episode-start",
+                title="Processing graph episode",
+                message=(
+                    f"已处理文段 {episode_index - 1}/{total_chunks}，"
+                    f"当前进入 chapter {chunk.chapter_index} paragraph {chunk.paragraph_index} 的图谱构建。"
+                ),
+                processed_snippets=episode_index - 1,
+                total_snippets=total_chunks,
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={"phase": "episode-start"},
             )
-            graph.episodes[episode_id] = episode
-            chapter_episode_ids[chunk.chapter_index].append(episode_id)
-            chapter_provenance[chunk.chapter_index].extend(provenance)
-            chapter_paragraph_count[chunk.chapter_index] += 1
-
+            llm_episode_extraction = self._extract_episode_with_llm(chunk=chunk, graph=graph)
             chapter_node_id = f"chapter_{chunk.chapter_index:03d}"
             chapter = graph.chapters.get(chapter_node_id)
             if chapter is None:
@@ -177,13 +267,47 @@ class TemporalGraphBuilder:
                     chapter_index=chunk.chapter_index,
                     title=_chapter_title(chunk),
                     spoiler_level=chunk.spoiler_level,
-                    metadata={
-                        "section_ids": [],
-                        "chunk_levels": [],
-                    },
+                    metadata={"section_ids": [], "chunk_levels": [], "reference_time": f"chapter://{book.book_id}/{chunk.chapter_index:03d}"},
                     provenance=[],
                 )
                 graph.chapters[chapter_node_id] = chapter
+
+            episode_id = f"episode_{chunk.chapter_index:03d}_{chunk.paragraph_index:03d}"
+            reference_time = f"narrative://{book.book_id}/c{chunk.chapter_index:03d}/p{chunk.paragraph_index:03d}"
+            episode = EpisodeNode(
+                episode_id=episode_id,
+                episode_type="paragraph",
+                book_id=book.book_id,
+                chunk_id=chunk.chunk_id,
+                chapter_id=chunk.chapter_id,
+                chapter_index=chunk.chapter_index,
+                paragraph_id=chunk.paragraph_id,
+                paragraph_index=chunk.paragraph_index,
+                episode_index=episode_index,
+                text=chunk.text,
+                spoiler_level=chunk.spoiler_level,
+                tags=list(chunk.tags),
+                reference_time=reference_time,
+                created_at=now,
+                metadata={
+                    "token_offset": chunk.token_offset,
+                    "position": chunk.position,
+                    "section_id": chunk.section_id,
+                    "paragraph_start_id": chunk.paragraph_start_id,
+                    "paragraph_end_id": chunk.paragraph_end_id,
+                    "extraction_mode": (
+                        llm_episode_extraction.extraction_mode if llm_episode_extraction is not None else "heuristic"
+                    ),
+                    **chunk.metadata,
+                },
+                provenance=[_build_provenance(chunk, "episode", {"reference_time": reference_time})],
+            )
+            if previous_episode_id is not None:
+                episode.prev_episode_id = previous_episode_id
+                graph.episodes[previous_episode_id].next_episode_id = episode_id
+            previous_episode_id = episode_id
+
+            graph.episodes[episode_id] = episode
             chapter.episode_ids.append(episode_id)
             chapter.paragraph_count += 1
             chapter.spoiler_level = max(chapter.spoiler_level, chunk.spoiler_level)
@@ -191,87 +315,83 @@ class TemporalGraphBuilder:
                 chapter.metadata["section_ids"].append(chunk.section_id)
             if chunk.chunk_level not in chapter.metadata["chunk_levels"]:
                 chapter.metadata["chunk_levels"].append(chunk.chunk_level)
-            chapter.provenance.extend(provenance)
+            chapter.provenance.extend(episode.provenance)
+            chapter_episode_ids[chunk.chapter_index].append(episode_id)
+            chapter_provenance[chunk.chapter_index].extend(episode.provenance)
+            chapter_paragraph_count[chunk.chapter_index] += 1
 
-            for name in entity_names:
-                entity_id = f"entity_{_slugify(name)}"
-                entity_ids.append(entity_id)
-                entity = graph.entities.get(entity_id)
-                if entity is None:
-                    entity = EntityNode(
-                        entity_id=entity_id,
-                        canonical_name=name,
-                        entity_type=_infer_entity_type(name, chunk),  # type: ignore[arg-type]
-                        first_seen_chapter=chunk.chapter_index,
-                        last_seen_chapter=chunk.chapter_index,
-                        metadata={
-                            "chapter_span": [],
-                            "alias_count": 0,
-                        },
-                    )
-                    graph.entities[entity_id] = entity
-                entity.mention_count += 1
-                entity.last_seen_chapter = max(entity.last_seen_chapter, chunk.chapter_index)
-                entity.first_seen_chapter = min(entity.first_seen_chapter, chunk.chapter_index)
+            entity_nodes = self._resolve_entities(
+                chunk,
+                graph,
+                entity_id_by_alias,
+                llm_episode_extraction=llm_episode_extraction,
+            )
+            entity_ids = [entity.entity_id for entity in entity_nodes]
+            episode.entity_ids = entity_ids
+            chapter.entity_ids = sorted(set(chapter.entity_ids).union(entity_ids))
+            chapter_entities[chunk.chapter_index].update(entity_ids)
+
+            for entity in entity_nodes:
                 if episode_id not in entity.episode_ids:
                     entity.episode_ids.append(episode_id)
-                entity_chapters[entity_id].add(chunk.chapter_index)
-                entity_provenance[entity_id].append(_build_provenance(chunk, "chunk"))
-                entity_episode_ids[entity_id].append(episode_id)
-                chapter_entities[chunk.chapter_index].add(entity_id)
-                if entity_id not in chapter.entity_ids:
-                    chapter.entity_ids.append(entity_id)
-
-            relation_ids: list[str] = []
-            for source_entity_id, target_entity_id in itertools.combinations(sorted(set(entity_ids)), 2):
-                relation_kind = _relation_type(chunk)
-                edge_id = (
-                    f"edge_{source_entity_id.removeprefix('entity_')}"
-                    f"__{target_entity_id.removeprefix('entity_')}"
-                    f"__{relation_kind}"
-                )
-                edge = graph.relations.get(edge_id)
-                if edge is None:
-                    edge = RelationEdge(
-                        edge_id=edge_id,
-                        source_entity_id=source_entity_id,
-                        target_entity_id=target_entity_id,
-                        relation_type=relation_kind,
-                        validity_start_chapter=chunk.chapter_index,
-                        validity_end_chapter=chunk.chapter_index,
-                        weight=0.0,
+                entity.mention_count += 1
+                if entity.first_seen_chapter == 0 or chunk.chapter_index < entity.first_seen_chapter:
+                    entity.first_seen_chapter = chunk.chapter_index
+                    entity.first_seen_paragraph = chunk.paragraph_index
+                if (
+                    chunk.chapter_index > entity.last_seen_chapter
+                    or (
+                        chunk.chapter_index == entity.last_seen_chapter
+                        and chunk.paragraph_index >= entity.last_seen_paragraph
                     )
-                    graph.relations[edge_id] = edge
-                edge.validity_start_chapter = min(edge.validity_start_chapter, chunk.chapter_index)
-                edge.validity_end_chapter = max(edge.validity_end_chapter or chunk.chapter_index, chunk.chapter_index)
-                edge.weight += 1.0
-                edge.metadata["chapter_span"] = [
-                    min(edge.validity_start_chapter, chunk.chapter_index),
-                    max(edge.validity_end_chapter or chunk.chapter_index, chunk.chapter_index),
-                ]
-                if episode_id not in edge.episode_ids:
-                    edge.episode_ids.append(episode_id)
-                edge.provenance.append(_build_provenance(chunk, "relation"))
-                relation_ids.append(edge_id)
-                chapter_relation_ids[chunk.chapter_index].add(edge_id)
-                if edge_id not in chapter.relation_ids:
-                    chapter.relation_ids.append(edge_id)
+                ):
+                    entity.last_seen_chapter = chunk.chapter_index
+                    entity.last_seen_paragraph = chunk.paragraph_index
+                entity.metadata.setdefault("chapter_span", [])
+                if chunk.chapter_index not in entity.metadata["chapter_span"]:
+                    entity.metadata["chapter_span"].append(chunk.chapter_index)
 
-            episode.entities = sorted(set(entity_ids))
+            relation_ids = self._extract_and_resolve_relations(
+                chunk=chunk,
+                episode=episode,
+                entity_nodes=entity_nodes,
+                graph=graph,
+                now=now,
+                active_relation_by_signature=active_relation_by_signature,
+                active_state_relation_by_key=active_state_relation_by_key,
+                relation_version_counter=relation_version_counter,
+                llm_episode_extraction=llm_episode_extraction,
+            )
             episode.relation_ids = relation_ids
-
-        for entity_id, entity in graph.entities.items():
-            chapters = sorted(entity_chapters[entity_id])
-            entity.metadata.update(
-                {
-                    "chapter_span": chapters,
-                    "episode_count": len(set(entity_episode_ids[entity_id])),
-                    "provenance_count": len(entity_provenance[entity_id]),
-                    "timeline_start": chapters[0] if chapters else 0,
-                    "timeline_end": chapters[-1] if chapters else 0,
-                }
+            chapter.relation_ids = sorted(set(chapter.relation_ids).union(relation_ids))
+            chapter_relation_ids[chunk.chapter_index].update(relation_ids)
+            self._emit_progress(
+                stage="graph-episode-complete",
+                title="Episode graph step completed",
+                message=(
+                    f"已完成文段 {episode_index}/{total_chunks}，"
+                    f"当前文段的 entities / facts 已写入临时图状态。"
+                ),
+                processed_snippets=episode_index,
+                total_snippets=total_chunks,
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={
+                    "phase": "episode-complete",
+                    "entity_count": len(entity_ids),
+                    "relation_count": len(relation_ids),
+                },
             )
 
+        self._emit_progress(
+            stage="graph-community-build",
+            title="Building communities",
+            message=f"所有文段已完成 episode/fact 写入，正在聚合 {total_chunks} 个文段对应的 community 结构。",
+            processed_snippets=total_chunks,
+            total_snippets=total_chunks,
+            details={"phase": "community-build"},
+        )
         communities = self._build_communities(
             graph=graph,
             chapter_entities=chapter_entities,
@@ -280,6 +400,14 @@ class TemporalGraphBuilder:
         )
         graph.communities.update(communities)
 
+        self._emit_progress(
+            stage="graph-saga-build",
+            title="Building sagas",
+            message="正在把跨章节叙事主线组织成 saga 结构。",
+            processed_snippets=total_chunks,
+            total_snippets=total_chunks,
+            details={"phase": "saga-build", "community_count": len(communities)},
+        )
         sagas = self._build_sagas(
             graph=graph,
             chapter_entities=chapter_entities,
@@ -288,18 +416,430 @@ class TemporalGraphBuilder:
         )
         graph.sagas.update(sagas)
 
+        for relation in graph.relations.values():
+            chapter_relation_ids[relation.valid_at_chapter].add(relation.edge_id)
+            if relation.status == "active":
+                chapter_active_relation_ids[relation.valid_at_chapter].add(relation.edge_id)
+            else:
+                chapter_invalidated_relation_ids[relation.valid_at_chapter].add(relation.edge_id)
+
+        self._emit_progress(
+            stage="graph-timeline-build",
+            title="Assembling chapter timeline",
+            message="正在汇总 chapter timeline、active facts 和 invalidated facts。",
+            processed_snippets=total_chunks,
+            total_snippets=total_chunks,
+            details={"phase": "timeline-build", "saga_count": len(sagas)},
+        )
         graph.chapter_timeline = self._build_chapter_timeline(
             graph=graph,
             chapter_episode_ids=chapter_episode_ids,
             chapter_entities=chapter_entities,
             chapter_relation_ids=chapter_relation_ids,
+            chapter_active_relation_ids=chapter_active_relation_ids,
+            chapter_invalidated_relation_ids=chapter_invalidated_relation_ids,
             chapter_provenance=chapter_provenance,
             chapter_paragraph_count=chapter_paragraph_count,
         )
         self._attach_chapter_collections(graph)
+
+        for entity in graph.entities.values():
+            chapter_span = entity.metadata.get("chapter_span", [])
+            entity.summary = self._entity_summary(entity, chapter_span)
+            entity.metadata["episode_count"] = len(set(entity.episode_ids))
+            entity.metadata["alias_count"] = len(entity.aliases)
+
         graph.metadata["graph_stats"] = graph.stats().model_dump()
         graph.metadata["chapter_timeline_count"] = len(graph.chapter_timeline)
+        graph.metadata["active_relation_count"] = sum(1 for edge in graph.relations.values() if edge.status == "active")
+        graph.metadata["invalidated_relation_count"] = sum(1 for edge in graph.relations.values() if edge.status == "invalidated")
+        self._emit_progress(
+            stage="graph-build-finished",
+            title="Temporal graph assembled",
+            message="图谱内存结构已经构建完成，等待持久化写盘。",
+            processed_snippets=total_chunks,
+            total_snippets=total_chunks,
+            details={
+                "phase": "graph-build-finished",
+                "entity_count": len(graph.entities),
+                "relation_count": len(graph.relations),
+                "community_count": len(graph.communities),
+                "saga_count": len(graph.sagas),
+            },
+        )
         return graph
+
+    def _emit_progress(self, **payload: dict) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback(payload)
+
+    def _extract_episode_with_llm(
+        self,
+        *,
+        chunk: BookChunk,
+        graph: TemporalContextGraph,
+    ) -> llm_extraction.EpisodeGraphExtraction | None:
+        if self.extractor_runtime is None:
+            return None
+        known_entities = [
+            llm_extraction.KnownEntityCandidate(
+                entity_id=entity.entity_id,
+                canonical_name=entity.canonical_name,
+                entity_type=entity.entity_type,
+                aliases=entity.aliases,
+                mention_count=entity.mention_count,
+                last_seen_chapter=entity.last_seen_chapter,
+                last_seen_paragraph=entity.last_seen_paragraph,
+            )
+            for entity in sorted(graph.entities.values(), key=lambda item: item.mention_count, reverse=True)
+            if entity.last_seen_chapter < chunk.chapter_index
+            or (
+                entity.last_seen_chapter == chunk.chapter_index
+                and entity.last_seen_paragraph < chunk.paragraph_index
+            )
+        ]
+        recent_episode_contexts = [
+            episode.text
+            for episode in sorted(graph.episodes.values(), key=lambda item: item.episode_index)[-3:]
+        ]
+        try:
+            self._emit_progress(
+                stage="llm-request-dispatched",
+                title="LLM entity/fact resolution",
+                message=(
+                    f"文段 {chunk.chunk_id} 正在调用 LLM 做 entity/fact resolution，"
+                    f"当前已交付 prompt，等待模型返回。"
+                ),
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={"phase": "llm-request-dispatched", "provider": self.extractor_runtime.provider_label},
+            )
+            extraction = llm_extraction.extract_episode_graph_with_llm(
+                runtime=self.extractor_runtime,
+                chunk=chunk,
+                known_entities=known_entities,
+                recent_episode_contexts=recent_episode_contexts,
+            )
+            self._emit_progress(
+                stage="llm-response-received",
+                title="LLM response received",
+                message=(
+                    f"文段 {chunk.chunk_id} 的 LLM 返回完成，"
+                    f"检测到 {len(extraction.entities)} 个实体候选和 {len(extraction.facts)} 条事实候选。"
+                ),
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={
+                    "phase": "llm-response-received",
+                    "entity_candidates": len(extraction.entities),
+                    "fact_candidates": len(extraction.facts),
+                },
+            )
+            return extraction
+        except Exception as exc:
+            graph.metadata.setdefault("llm_extraction_warnings", [])
+            graph.metadata["llm_extraction_warnings"].append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "chapter_index": chunk.chapter_index,
+                    "paragraph_index": chunk.paragraph_index,
+                    "reason": str(exc),
+                }
+            )
+            if self.strict_llm_extraction:
+                raise RuntimeError(
+                    f"strict llm extraction failed for {chunk.chunk_id}: {exc}"
+                ) from exc
+            self._emit_progress(
+                stage="llm-request-failed",
+                title="LLM extraction failed, falling back",
+                message=f"文段 {chunk.chunk_id} 的 LLM 抽取失败，当前退回启发式 fact extraction。",
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={"phase": "llm-request-failed", "error": str(exc)},
+            )
+            return None
+
+    def _resolve_entities(
+        self,
+        chunk: BookChunk,
+        graph: TemporalContextGraph,
+        entity_id_by_alias: dict[str, str],
+        llm_episode_extraction: llm_extraction.EpisodeGraphExtraction | None = None,
+    ) -> list[EntityNode]:
+        extraction_candidates = self._entity_candidates_from_extraction(chunk, llm_episode_extraction)
+        resolved: list[EntityNode] = []
+        for raw_name, raw_type, aliases, resolution_hint, evidence, confidence, resolution_strategy in extraction_candidates:
+            canonical_name = _normalize_entity_name(raw_name)
+            aliases = sorted({*aliases, *(_entity_aliases(canonical_name))})
+            alias_keys = {_slugify(alias) for alias in aliases}
+            entity_id = None
+            if resolution_hint:
+                entity_id = entity_id_by_alias.get(_slugify(resolution_hint))
+            for alias_key in alias_keys:
+                entity_id = entity_id_by_alias.get(alias_key)
+                if entity_id:
+                    break
+            if entity_id is None:
+                entity_id = f"entity_{_slugify(canonical_name)}"
+                if entity_id in graph.entities:
+                    relation_index = len(graph.entities) + 1
+                    entity_id = f"{entity_id}_{relation_index:03d}"
+                entity = EntityNode(
+                    entity_id=entity_id,
+                    canonical_name=canonical_name,
+                    aliases=aliases,
+                    entity_type=_infer_entity_type(canonical_name, raw_type, chunk),  # type: ignore[arg-type]
+                    metadata={
+                        "resolution_strategy": resolution_strategy,
+                        "resolution_hint": resolution_hint,
+                        "last_evidence": evidence,
+                        "last_confidence": confidence,
+                    },
+                )
+                graph.entities[entity_id] = entity
+            else:
+                entity = graph.entities[entity_id]
+                for alias in aliases:
+                    if alias not in entity.aliases:
+                        entity.aliases.append(alias)
+                if canonical_name not in entity.aliases and canonical_name != entity.canonical_name:
+                    entity.aliases.append(canonical_name)
+                entity.metadata["resolution_strategy"] = resolution_strategy
+                if resolution_hint:
+                    entity.metadata["resolution_hint"] = resolution_hint
+                if evidence:
+                    entity.metadata["last_evidence"] = evidence
+                entity.metadata["last_confidence"] = confidence
+            for alias_key in alias_keys:
+                entity_id_by_alias[alias_key] = entity.entity_id
+            resolved.append(entity)
+        deduped = {entity.entity_id: entity for entity in resolved}
+        return list(deduped.values())
+
+    def _entity_candidates_from_extraction(
+        self,
+        chunk: BookChunk,
+        llm_episode_extraction: llm_extraction.EpisodeGraphExtraction | None,
+    ) -> list[tuple[str, str, list[str], str, str, float, str]]:
+        if llm_episode_extraction and llm_episode_extraction.entities:
+            rows: list[tuple[str, str, list[str], str, str, float, str]] = []
+            for item in llm_episode_extraction.entities:
+                aliases = [alias for alias in item.aliases if alias.strip()]
+                rows.append(
+                    (
+                        item.canonical_name,
+                        item.entity_type,
+                        aliases,
+                        item.resolution_hint,
+                        item.evidence,
+                        item.confidence,
+                        "llm-assisted",
+                    )
+                )
+            return rows
+        return [
+            (raw_name, raw_type, [], "", "", 0.0, "heuristic-alias")
+            for raw_name, raw_type in _extract_entity_mentions(chunk)
+        ]
+
+    def _extract_and_resolve_relations(
+        self,
+        *,
+        chunk: BookChunk,
+        episode: EpisodeNode,
+        entity_nodes: list[EntityNode],
+        graph: TemporalContextGraph,
+        now: str,
+        active_relation_by_signature: dict[str, str],
+        active_state_relation_by_key: dict[str, str],
+        relation_version_counter: Counter[str],
+        llm_episode_extraction: llm_extraction.EpisodeGraphExtraction | None = None,
+    ) -> list[str]:
+        relation_ids: list[str] = []
+        if llm_episode_extraction and llm_episode_extraction.facts:
+            for fact_candidate in llm_episode_extraction.facts:
+                source_entity = self._match_entity_by_name(fact_candidate.source, entity_nodes)
+                target_entity = self._match_entity_by_name(fact_candidate.target, entity_nodes)
+                if source_entity is None or target_entity is None or source_entity.entity_id == target_entity.entity_id:
+                    continue
+                relation_ids.extend(
+                    self._upsert_relation_edge(
+                        chunk=chunk,
+                        episode=episode,
+                        graph=graph,
+                        now=now,
+                        active_relation_by_signature=active_relation_by_signature,
+                        active_state_relation_by_key=active_state_relation_by_key,
+                        relation_version_counter=relation_version_counter,
+                        source_entity=source_entity,
+                        target_entity=target_entity,
+                        relation_type=fact_candidate.relation_type,
+                        state_family=fact_candidate.state_family,
+                        directionality=fact_candidate.directionality,
+                        fact_text=fact_candidate.fact,
+                        evidence_text=fact_candidate.evidence or fact_candidate.fact,
+                        extraction_mode="llm-assisted",
+                        confidence=fact_candidate.confidence,
+                    )
+                )
+            if relation_ids:
+                return sorted(set(relation_ids))
+
+        sentences = _split_sentences(chunk.text) or [chunk.text]
+        for sentence in sentences:
+            matched_entities = _match_entities_in_sentence(sentence, entity_nodes)
+            if len(matched_entities) < 2:
+                continue
+            for source, target in itertools.combinations(matched_entities, 2):
+                relation_type, state_family, directionality = _relation_from_sentence(sentence, source, target)
+                source_entity = source
+                target_entity = target
+                if relation_type in {"LOCATED_IN", "MEMBER_OF", "CARES_ABOUT"} and source.entity_type != "character":
+                    source_entity, target_entity = target, source
+                relation_ids.extend(
+                    self._upsert_relation_edge(
+                        chunk=chunk,
+                        episode=episode,
+                        graph=graph,
+                        now=now,
+                        active_relation_by_signature=active_relation_by_signature,
+                        active_state_relation_by_key=active_state_relation_by_key,
+                        relation_version_counter=relation_version_counter,
+                        source_entity=source_entity,
+                        target_entity=target_entity,
+                        relation_type=relation_type,
+                        state_family=state_family,
+                        directionality=directionality,
+                        fact_text=" ".join(sentence.split()),
+                        evidence_text=sentence,
+                        extraction_mode="heuristic",
+                        confidence=0.0,
+                    )
+                )
+
+        return sorted(set(relation_ids))
+
+    def _upsert_relation_edge(
+        self,
+        *,
+        chunk: BookChunk,
+        episode: EpisodeNode,
+        graph: TemporalContextGraph,
+        now: str,
+        active_relation_by_signature: dict[str, str],
+        active_state_relation_by_key: dict[str, str],
+        relation_version_counter: Counter[str],
+        source_entity: EntityNode,
+        target_entity: EntityNode,
+        relation_type: str,
+        state_family: str,
+        directionality: RelationDirectionality,
+        fact_text: str,
+        evidence_text: str,
+        extraction_mode: str,
+        confidence: float,
+    ) -> list[str]:
+        signature = _fact_signature(
+            relation_type=relation_type,
+            state_family=state_family,
+            source_entity_id=source_entity.entity_id,
+            target_entity_id=target_entity.entity_id,
+            directionality=directionality,
+        )
+        existing_edge_id = active_relation_by_signature.get(signature)
+        if existing_edge_id:
+            edge = graph.relations[existing_edge_id]
+            edge.weight += 1.0
+            if episode.episode_id not in edge.episode_ids:
+                edge.episode_ids.append(episode.episode_id)
+            edge.provenance.append(_build_provenance(chunk, "relation", {"sentence": evidence_text}))
+            edge.metadata["last_seen_episode_id"] = episode.episode_id
+            edge.metadata["extraction_mode"] = extraction_mode
+            edge.metadata["confidence"] = max(float(edge.metadata.get("confidence", 0.0)), confidence)
+            return [edge.edge_id]
+
+        state_key = _state_key(state_family, source_entity.entity_id, directionality, target_entity.entity_id)
+        superseded_edges: list[str] = []
+        if state_key:
+            active_state_edge_id = active_state_relation_by_key.get(state_key)
+            if active_state_edge_id and active_state_edge_id in graph.relations:
+                active_edge = graph.relations[active_state_edge_id]
+                if active_edge.target_entity_id != target_entity.entity_id:
+                    active_edge.status = "invalidated"
+                    active_edge.invalid_at_chapter = chunk.chapter_index
+                    active_edge.invalid_at_paragraph = chunk.paragraph_index
+                    active_edge.expired_at = now
+                    active_edge.invalidated_by_edge_id = "pending"
+                    superseded_edges.append(active_edge.edge_id)
+
+        base_signature_slug = _slugify(signature)
+        relation_version_counter[base_signature_slug] += 1
+        version = relation_version_counter[base_signature_slug]
+        edge_id = f"edge_{base_signature_slug}_v{version:03d}"
+        reference_time = f"narrative://{chunk.book_id}/c{chunk.chapter_index:03d}/p{chunk.paragraph_index:03d}"
+        edge = RelationEdge(
+            edge_id=edge_id,
+            source_entity_id=source_entity.entity_id,
+            target_entity_id=target_entity.entity_id,
+            relation_type=relation_type,
+            state_family=state_family,
+            directionality=directionality,
+            fact=fact_text,
+            fact_signature=signature,
+            weight=1.0,
+            status="active",
+            valid_at_chapter=chunk.chapter_index,
+            valid_at_paragraph=chunk.paragraph_index,
+            created_at=now,
+            reference_time=reference_time,
+            supersedes_edge_ids=superseded_edges,
+            episode_ids=[episode.episode_id],
+            metadata={
+                "chapter_id": chunk.chapter_id,
+                "paragraph_id": chunk.paragraph_id,
+                "sentence_excerpt": _excerpt(evidence_text, limit=240),
+                "state_key": state_key,
+                "extraction_mode": extraction_mode,
+                "confidence": confidence,
+            },
+            provenance=[_build_provenance(chunk, "relation", {"sentence": evidence_text, "reference_time": reference_time})],
+        )
+        graph.relations[edge_id] = edge
+        active_relation_by_signature[signature] = edge_id
+        if state_key:
+            active_state_relation_by_key[state_key] = edge_id
+        for superseded_edge_id in superseded_edges:
+            graph.relations[superseded_edge_id].invalidated_by_edge_id = edge_id
+        return [edge_id]
+
+    def _match_entity_by_name(self, name: str, entity_nodes: list[EntityNode]) -> EntityNode | None:
+        normalized = _normalize_entity_name(name)
+        if not normalized:
+            return None
+        lowered = normalized.lower()
+        for entity in entity_nodes:
+            if entity.canonical_name.lower() == lowered:
+                return entity
+            if any(alias.lower() == lowered for alias in entity.aliases):
+                return entity
+        for entity in entity_nodes:
+            forms = {entity.canonical_name.lower(), *(alias.lower() for alias in entity.aliases)}
+            if any(lowered in form or form in lowered for form in forms if form):
+                return entity
+        return None
+
+    def _entity_summary(self, entity: EntityNode, chapter_span: list[int]) -> str:
+        if not chapter_span:
+            return f"{entity.canonical_name} appears in the current book graph."
+        return (
+            f"{entity.canonical_name} is tracked as a {entity.entity_type} "
+            f"from chapter {chapter_span[0]} to chapter {chapter_span[-1]} "
+            f"across {entity.mention_count} mentions."
+        )
 
     def _build_communities(
         self,
@@ -309,9 +849,12 @@ class TemporalGraphBuilder:
         chapter_provenance: dict[int, list[GraphProvenance]],
     ) -> dict[str, CommunityNode]:
         adjacency: dict[str, set[str]] = defaultdict(set)
+        relation_ids_by_entity: dict[str, set[str]] = defaultdict(set)
         for edge in graph.relations.values():
             adjacency[edge.source_entity_id].add(edge.target_entity_id)
             adjacency[edge.target_entity_id].add(edge.source_entity_id)
+            relation_ids_by_entity[edge.source_entity_id].add(edge.edge_id)
+            relation_ids_by_entity[edge.target_entity_id].add(edge.edge_id)
 
         communities: dict[str, CommunityNode] = {}
         visited: set[str] = set()
@@ -340,28 +883,32 @@ class TemporalGraphBuilder:
                     episode_id
                     for chapter_index in chapters
                     for episode_id in chapter_episode_ids[chapter_index]
-                    if set(graph.episodes[episode_id].entities).intersection(component)
+                    if set(graph.episodes[episode_id].entity_ids).intersection(component)
                 }
             )
+            relation_ids = sorted({edge_id for entity in component for edge_id in relation_ids_by_entity[entity]})
             label_names = [
                 graph.entities[candidate].canonical_name
                 for candidate in sorted(component, key=lambda item: graph.entities[item].mention_count, reverse=True)[:3]
             ]
             community_id = f"community_{component_index:03d}"
-            community = CommunityNode(
+            summary = (
+                f"Community {component_index} links "
+                f"{', '.join(label_names) if label_names else 'local entities'} "
+                f"through {len(relation_ids)} temporal facts."
+            )
+            communities[community_id] = CommunityNode(
                 community_id=community_id,
                 label="/".join(label_names) or community_id,
+                summary=summary,
                 entity_ids=sorted(component),
                 episode_ids=episode_ids,
+                relation_ids=relation_ids,
                 chapter_start=chapters[0] if chapters else 0,
                 chapter_end=chapters[-1] if chapters else 0,
-                metadata={
-                    "entity_count": len(component),
-                    "dominant_entities": label_names,
-                },
+                metadata={"entity_count": len(component), "dominant_entities": label_names},
                 provenance=[item for chapter_index in chapters for item in chapter_provenance[chapter_index][:2]],
             )
-            communities[community_id] = community
             for episode_id in episode_ids:
                 graph.episodes[episode_id].community_ids.append(community_id)
             component_index += 1
@@ -404,27 +951,29 @@ class TemporalGraphBuilder:
             )
             dominant_entities = [entity_id for entity_id, _ in entity_counter.most_common(4)]
             label_parts = [graph.entities[entity_id].canonical_name for entity_id in dominant_entities[:2]]
-            saga_id = f"saga_{index:03d}"
+            relation_ids = [
+                relation.edge_id
+                for relation in graph.relations.values()
+                if relation.valid_at_chapter >= chapters[0] and relation.valid_at_chapter <= chapters[-1]
+            ]
             summary = (
                 f"Chapters {chapters[0]}-{chapters[-1]} track "
                 f"{', '.join(label_parts) if label_parts else 'the current narrative thread'} "
-                f"across {len(episode_ids)} visible episodes."
+                f"through {len(episode_ids)} episodes and {len(relation_ids)} facts."
             )
-            saga = SagaNode(
+            saga_id = f"saga_{index:03d}"
+            sagas[saga_id] = SagaNode(
                 saga_id=saga_id,
                 label=" / ".join(label_parts) or f"chapters_{chapters[0]}_{chapters[-1]}",
                 episode_ids=episode_ids,
                 entity_ids=dominant_entities,
+                relation_ids=relation_ids,
                 chapter_start=chapters[0],
                 chapter_end=chapters[-1],
                 summary=summary,
-                metadata={
-                    "chapter_count": len(chapters),
-                    "dominant_entities": dominant_entities,
-                },
+                metadata={"chapter_count": len(chapters), "dominant_entities": dominant_entities},
                 provenance=[item for chapter_index in chapters for item in chapter_provenance[chapter_index][:2]],
             )
-            sagas[saga_id] = saga
             for episode_id in episode_ids:
                 graph.episodes[episode_id].saga_ids.append(saga_id)
 
@@ -436,6 +985,8 @@ class TemporalGraphBuilder:
         chapter_episode_ids: dict[int, list[str]],
         chapter_entities: dict[int, set[str]],
         chapter_relation_ids: dict[int, set[str]],
+        chapter_active_relation_ids: dict[int, set[str]],
+        chapter_invalidated_relation_ids: dict[int, set[str]],
         chapter_provenance: dict[int, list[GraphProvenance]],
         chapter_paragraph_count: Counter[int],
     ) -> list[ChapterTimelineEntry]:
@@ -468,6 +1019,8 @@ class TemporalGraphBuilder:
                     episode_ids=chapter_episode_ids[chapter_index],
                     entity_ids=sorted(chapter_entities.get(chapter_index, set())),
                     relation_ids=sorted(chapter_relation_ids.get(chapter_index, set())),
+                    active_relation_ids=sorted(chapter_active_relation_ids.get(chapter_index, set())),
+                    invalidated_relation_ids=sorted(chapter_invalidated_relation_ids.get(chapter_index, set())),
                     community_ids=community_map.get(chapter_index, []),
                     saga_ids=saga_map.get(chapter_index, []),
                     spoiler_level=max(
@@ -478,9 +1031,7 @@ class TemporalGraphBuilder:
                         f"Chapter {chapter_index} centers on "
                         f"{', '.join(entity_names) if entity_names else 'the local narrative state'}."
                     ),
-                    metadata={
-                        "dominant_entities": entity_names,
-                    },
+                    metadata={"dominant_entities": entity_names},
                     provenance=chapter_provenance[chapter_index][:4],
                 )
             )
@@ -493,6 +1044,8 @@ class TemporalGraphBuilder:
                 continue
             chapter.community_ids = timeline_entry.community_ids
             chapter.saga_ids = timeline_entry.saga_ids
+            chapter.active_relation_ids = timeline_entry.active_relation_ids
+            chapter.invalidated_relation_ids = timeline_entry.invalidated_relation_ids
             chapter.metadata["timeline_summary"] = timeline_entry.summary
             for relation_id in timeline_entry.relation_ids:
                 if relation_id not in chapter.relation_ids:

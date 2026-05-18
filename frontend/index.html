@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Muse Reading</title>
-    <link rel="stylesheet" href="/static/main.css?v=20260514d" />
+    <link rel="stylesheet" href="/static/main.css?v=20260518-graphiti-progress" />
   </head>
   <body>
     <div class="app-frame">
@@ -22,11 +22,19 @@
 
       <section id="pending-indicator" class="pending-indicator" aria-live="polite">
         <div class="pending-indicator-header">
-          <span class="eyebrow">Request Status</span>
+          <div>
+            <span class="eyebrow">Pipeline Status</span>
+            <p id="pending-title" class="pending-title">Idle</p>
+          </div>
           <span id="pending-label" class="pending-label">idle</span>
         </div>
+        <p id="pending-description" class="pending-description">等待用户发起上传、问答或总结请求。</p>
         <div class="pending-track">
           <div id="pending-bar" class="pending-bar"></div>
+        </div>
+        <div class="pending-meta">
+          <strong id="pending-percent" class="pending-percent">0%</strong>
+          <span id="pending-step-caption" class="pending-step-caption">当前没有运行中的流程。</span>
         </div>
       </section>
 
@@ -219,6 +227,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260514d"></script>
+    <script src="/static/app.js?v=20260518-graphiti-progress"></script>
   </body>
 </html>

@@ -1,5 +1,72 @@
 const CHARS_PER_PAGE = 1150;
-const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_TIMEOUT_MS = 300000;
+const WORKFLOW_TICK_MS = 900;
+
+const PENDING_WORKFLOWS = {
+  idle: {
+    title: "Idle",
+    description: "等待用户发起上传、问答或总结请求。",
+    steps: [],
+  },
+  uploadGraph: {
+    title: "Graphiti Temporal Graph Build",
+    description: "正在把上传文本转换成 Graphiti 风格的时序知识图谱基座。",
+    steps: [
+      { name: "Extract source text", copy: "读取 TXT / PDF / EPUB，并提取后续建图所需的正文。" },
+      { name: "Segment chapters", copy: "按章节和段落切分文本，建立稳定的阅读边界。" },
+      { name: "Construct episodes", copy: "把段落转换为 canonical episodes，并串起 narrative order。" },
+      { name: "Resolve entities", copy: "结合已有图节点和上下文，做 LLM-assisted entity resolution。" },
+      { name: "Resolve facts", copy: "抽取人物、地点、关系和状态事实，并做 temporal invalidation。" },
+      { name: "Build communities", copy: "汇总 chapter timeline、community 和 saga 结构。" },
+      { name: "Build sagas", copy: "把跨章节的叙事主线整理成 saga 级结构。" },
+      { name: "Assemble chapter timeline", copy: "把 episode、entity 和 relation 汇总成章节时间线。" },
+      { name: "Serialize graph payload", copy: "把内存中的图节点、边和元数据序列化为可落盘格式。" },
+      { name: "Persist book record", copy: "先写入 book record，固定章节、段落和阅读视图数据。" },
+      { name: "Persist graph snapshot", copy: "写入 temporal graph 快照、relations、communities 和 sagas。" },
+      { name: "Finalize graph metadata", copy: "收尾图统计、storage metadata 和前端可读索引。" },
+    ],
+  },
+  personaQa: {
+    title: "Persona Answering",
+    description: "正在组合书本上下文、名家 persona RAG 和防剧透约束。",
+    steps: [
+      { name: "Read current scope", copy: "定位当前章节、高亮和可见上下文。" },
+      { name: "Retrieve graph context", copy: "从 temporal graph 检索当前问题相关的已读事实。" },
+      { name: "Retrieve persona context", copy: "召回名家资料片段和风格证据。" },
+      { name: "Apply spoiler guard", copy: "根据当前进度过滤未来信息，只保留可见范围。" },
+      { name: "Generate answer", copy: "组织成完整名家回答并写回对话区。" },
+    ],
+  },
+  characterQa: {
+    title: "Character Companion Answering",
+    description: "正在让书中角色在当前已读边界内进行陪读回应。",
+    steps: [
+      { name: "Read visible scope", copy: "定位当前章节和用户高亮对应的可见文本。" },
+      { name: "Resolve character memory", copy: "检索角色在当前进度前已经出现的事件和关系。" },
+      { name: "Apply spoiler guard", copy: "过滤角色未来命运和后文未揭示信息。" },
+      { name: "Generate answer", copy: "以角色身份输出连续陪读回答。" },
+    ],
+  },
+  chapterSummary: {
+    title: "Chapter Summary",
+    description: "正在根据当前已读内容生成阶段性总结。",
+    steps: [
+      { name: "Collect chapter episodes", copy: "收集当前章节已读段落和相邻证据。" },
+      { name: "Read graph state", copy: "整理人物、关系和主题在本章的局部演化。" },
+      { name: "Apply spoiler guard", copy: "阻断未来章节信息，只总结当前可见范围。" },
+      { name: "Generate summary", copy: "输出阶段总结并写入对话记录。" },
+    ],
+  },
+  characterProfile: {
+    title: "Character Profile Build",
+    description: "正在根据当前已读文本生成角色画像。",
+    steps: [
+      { name: "Find character evidence", copy: "在当前已读范围内定位角色出现的证据段落。" },
+      { name: "Assemble relation view", copy: "汇总该角色可见的人物关系和张力。" },
+      { name: "Generate profile", copy: "生成用于前端可视化的角色卡片。" },
+    ],
+  },
+};
 
 const state = {
   books: [],
@@ -20,6 +87,7 @@ const state = {
   inlineBubblesByChunk: {},
   sessionId: `sess_${Date.now()}`,
   requestCounter: 0,
+  pendingWorkflow: null,
   chapterEnteredAt: Date.now(),
   readingProgress: {
     book_id: "",
@@ -45,6 +113,8 @@ const state = {
   },
 };
 
+let pendingWorkflowTimer = null;
+
 async function fetchJSON(url, options = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -53,7 +123,7 @@ async function fetchJSON(url, options = {}) {
     response = await fetch(url, { ...options, signal: options.signal || controller.signal });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error(`请求超时（${REQUEST_TIMEOUT_MS / 1000}s）`);
+      throw new Error(`请求等待超过 ${REQUEST_TIMEOUT_MS / 1000}s。`);
     }
     throw error;
   } finally {
@@ -73,14 +143,169 @@ async function fetchJSON(url, options = {}) {
   return response.json();
 }
 
-function setPendingState(active, label = "idle") {
+function clearPendingWorkflowTimer() {
+  if (pendingWorkflowTimer) {
+    window.clearInterval(pendingWorkflowTimer);
+    pendingWorkflowTimer = null;
+  }
+}
+
+function renderPendingWorkflow() {
   const indicator = document.getElementById("pending-indicator");
   const pendingLabel = document.getElementById("pending-label");
-  if (!indicator || !pendingLabel) {
+  const pendingTitle = document.getElementById("pending-title");
+  const pendingDescription = document.getElementById("pending-description");
+  const pendingBar = document.getElementById("pending-bar");
+  const pendingPercent = document.getElementById("pending-percent");
+  const pendingStepCaption = document.getElementById("pending-step-caption");
+
+  if (!indicator || !pendingLabel || !pendingTitle || !pendingDescription || !pendingBar || !pendingPercent || !pendingStepCaption) {
     return;
   }
-  pendingLabel.textContent = label;
-  indicator.classList.toggle("is-active", active);
+
+  const workflow = state.pendingWorkflow;
+  if (!workflow) {
+    pendingLabel.textContent = "idle";
+    pendingTitle.textContent = PENDING_WORKFLOWS.idle.title;
+    pendingDescription.textContent = PENDING_WORKFLOWS.idle.description;
+    pendingBar.style.width = "0%";
+    pendingPercent.textContent = "0%";
+    pendingStepCaption.textContent = "当前没有运行中的流程。";
+    indicator.classList.remove("is-active", "is-indeterminate");
+    return;
+  }
+
+  indicator.classList.add("is-active");
+  indicator.classList.toggle("is-indeterminate", workflow.indeterminate === true);
+  pendingLabel.textContent = workflow.label;
+  pendingTitle.textContent = workflow.title;
+  pendingDescription.textContent = workflow.description;
+  pendingBar.style.width = workflow.indeterminate ? "32%" : `${workflow.percent}%`;
+  pendingPercent.textContent = `${workflow.percent}%`;
+  pendingStepCaption.textContent = workflow.currentStep?.copy || "正在等待下一步状态。";
+}
+
+function setPendingState(active, label = "idle") {
+  if (!active) {
+    clearPendingWorkflowTimer();
+    state.pendingWorkflow = null;
+    renderPendingWorkflow();
+    return;
+  }
+  state.pendingWorkflow = {
+    label,
+    title: "Processing",
+    description: "正在处理请求。",
+    steps: [],
+    currentIndex: -1,
+    currentStep: null,
+    percent: 12,
+    indeterminate: true,
+  };
+  renderPendingWorkflow();
+}
+
+function startPendingWorkflow(workflowKey, label = "running") {
+  clearPendingWorkflowTimer();
+  const template = PENDING_WORKFLOWS[workflowKey] || PENDING_WORKFLOWS.idle;
+  const steps = template.steps || [];
+  const totalSteps = steps.length || 1;
+  const basePercent = steps.length ? Math.max(8, Math.round(100 / (totalSteps + 1))) : 18;
+  state.pendingWorkflow = {
+    key: workflowKey,
+    label,
+    title: template.title,
+    description: template.description,
+    steps,
+    currentIndex: 0,
+    currentStep: steps[0] || null,
+    percent: steps.length ? basePercent : 18,
+    indeterminate: false,
+  };
+  renderPendingWorkflow();
+
+  if (!steps.length) {
+    return;
+  }
+
+  pendingWorkflowTimer = window.setInterval(() => {
+    if (!state.pendingWorkflow || state.pendingWorkflow.key !== workflowKey) {
+      clearPendingWorkflowTimer();
+      return;
+    }
+    const nextIndex = Math.min(state.pendingWorkflow.currentIndex + 1, totalSteps - 1);
+    state.pendingWorkflow.currentIndex = nextIndex;
+    state.pendingWorkflow.currentStep = steps[nextIndex];
+    state.pendingWorkflow.percent = Math.min(92, basePercent + nextIndex * Math.round(84 / totalSteps));
+    renderPendingWorkflow();
+    if (nextIndex >= totalSteps - 1) {
+      clearPendingWorkflowTimer();
+    }
+  }, WORKFLOW_TICK_MS);
+}
+
+function finishPendingWorkflow(label = "done", title = "Completed", description = "流程已经完成。") {
+  clearPendingWorkflowTimer();
+  if (!state.pendingWorkflow) {
+    return;
+  }
+  const lastIndex = Math.max(0, state.pendingWorkflow.steps.length - 1);
+  state.pendingWorkflow = {
+    ...state.pendingWorkflow,
+    label,
+    title,
+    description,
+    currentIndex: lastIndex,
+    currentStep: state.pendingWorkflow.steps[lastIndex] || null,
+    percent: 100,
+    indeterminate: false,
+  };
+  renderPendingWorkflow();
+}
+
+function releasePendingState(delayMs = 900) {
+  window.setTimeout(() => {
+    state.pendingWorkflow = null;
+    renderPendingWorkflow();
+  }, delayMs);
+}
+
+function applyUploadJobState(job) {
+  const processed = job.processed_snippets || 0;
+  const total = job.total_snippets || 0;
+  const snippetProgress = total ? `已处理文段 ${processed}/${total}` : "正在准备文段统计";
+  const currentSnippet = job.current_snippet_id
+    ? `当前文段 ${job.current_snippet_id}（chapter ${job.current_chapter_index || "-"} / paragraph ${job.current_paragraph_index || "-"}）`
+    : "当前还没有锁定到具体文段";
+  state.pendingWorkflow = {
+    key: "uploadGraph",
+    label: job.status,
+    title: job.title || "Temporal graph build",
+    description: job.message || "",
+    percent: job.percent || 0,
+    indeterminate: false,
+    currentIndex: 0,
+    currentStep: {
+      name: job.stage || "running",
+      copy: `${snippetProgress}。${currentSnippet}。`,
+    },
+    steps: [],
+  };
+  renderPendingWorkflow();
+}
+
+async function waitForUploadJob(jobId) {
+  while (true) {
+    const job = await fetchJSON(`/api/upload-jobs/${jobId}`);
+    applyUploadJobState(job);
+    if (job.status === "completed") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || job.message || "upload job failed");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+  }
 }
 
 function setButtonLoading(buttonId, isLoading, loadingText = "") {
@@ -104,7 +329,7 @@ function getPersonaById(personaId) {
   return state.personas.find((persona) => persona.persona_id === personaId) || state.personas[0] || null;
 }
 
-function previewText(text, fallback = "暂无内容") {
+function previewText(text, fallback = "还没有选中的文本") {
   return text && text.trim() ? text.trim() : fallback;
 }
 
@@ -259,7 +484,7 @@ function renderCharacterProfile() {
   const container = document.getElementById("character-profile-card");
   container.innerHTML = "";
   if (!state.activeCharacterProfile) {
-    container.innerHTML = '<p class="muted">打开书籍后可选择角色候选，或手动输入角色名来生成角色画像。</p>';
+    container.innerHTML = '<p class="muted">生成角色画像后，这里会展示当前已读范围内的角色摘要、张力和关系。</p>';
     return;
   }
 
@@ -285,8 +510,8 @@ function renderCharacterProfile() {
     <h4 class="character-name">${profile.character_name}</h4>
     <p class="muted">${profile.summary}</p>
     <p class="label">核心张力</p>
-    <p class="signature-tension">${profile.signature_tension || "当前证据尚不足以提炼更强张力。"}</p>
-    <p class="label">当前已读范围</p>
+    <p class="signature-tension">${profile.signature_tension || "当前已读范围内还没有足够的角色冲突描述。"}</p>
+    <p class="label">当前可见范围</p>
     <p class="muted">${profile.current_scope}</p>
     <p class="label">模型</p>
     <p class="muted">${profile.model_name}</p>
@@ -295,7 +520,7 @@ function renderCharacterProfile() {
   if (relationList.children.length) {
     const heading = document.createElement("p");
     heading.className = "label";
-    heading.textContent = "关系网络";
+    heading.textContent = "人物关系";
     container.appendChild(heading);
     container.appendChild(relationList);
   }
@@ -323,9 +548,9 @@ function renderBooks() {
 
 function renderReaderHeader() {
   if (!state.activeBookDetail) {
-    document.getElementById("book-title").textContent = "请选择一本书开始阅读";
-    document.getElementById("book-subtitle").textContent = "页面会跟踪章节、段落与翻页位置，并同步构造 reading_progress。";
-    document.getElementById("progress-text").textContent = "尚未加载书籍。";
+    document.getElementById("book-title").textContent = "选择一本书开始阅读";
+    document.getElementById("book-subtitle").textContent = "上传文本后，系统会切分章节、建立阅读进度并自动构建 temporal knowledge graph。";
+    document.getElementById("progress-text").textContent = "当前还没有激活的阅读进度。";
     document.getElementById("hero-chapter").textContent = "-";
     document.getElementById("hero-paragraph").textContent = "-";
     document.getElementById("hero-dwell").textContent = "0s";
@@ -335,7 +560,7 @@ function renderReaderHeader() {
   document.getElementById("book-title").textContent = state.activeBookDetail.title;
   document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id}，共 ${state.activeBookDetail.chapter_count} 章。`;
   document.getElementById("progress-text").textContent =
-    `当前位于第 ${state.readingProgress.chapter_id} 章 / 第 ${state.activePageIndex + 1} 页 / 段落 ${state.readingProgress.paragraph_id || "-"}，全章共 ${pages.length || 0} 页。`;
+    `当前位于第 ${state.readingProgress.chapter_id} 章 / 第 ${state.activePageIndex + 1} 页 / 段落 ${state.readingProgress.paragraph_id || "-"}，本章共 ${pages.length || 0} 页。`;
   document.getElementById("hero-chapter").textContent = `第 ${state.activeChapter} 章`;
   document.getElementById("hero-paragraph").textContent = state.activeParagraphIndex === null ? "-" : `P${state.activeParagraphIndex}`;
   document.getElementById("hero-dwell").textContent = `${state.readingProgress.dwell_seconds || 0}s`;
@@ -345,7 +570,7 @@ function renderChapterNav() {
   const container = document.getElementById("chapter-nav");
   container.innerHTML = "";
   if (!state.activeBookDetail) {
-    container.innerHTML = '<p class="muted">书籍载入后会显示章节目录。</p>';
+    container.innerHTML = '<p class="muted">上传或选择一本书后，这里会显示章节目录。</p>';
     return;
   }
   for (let chapter = 1; chapter <= state.activeBookDetail.chapter_count; chapter += 1) {
@@ -390,7 +615,7 @@ function renderChapterSelects() {
 function renderSelectionPreview() {
   document.getElementById("highlight-preview").textContent = previewText(
     state.selectionContext.selected_text,
-    "点击正文中的段落后，这里会显示当前选中的阅读上下文。"
+    "点击正文中的任意段落，这里会显示当前选中的文本。"
   );
 }
 
@@ -398,13 +623,13 @@ function renderAssistantStatus() {
   const node = document.getElementById("assistant-status");
   if (state.assistantMode === "persona") {
     const persona = getPersonaById(state.personaId);
-    node.textContent = persona ? `当前使用 ${persona.name} 作为名家导读。` : "当前使用名家导读模式。";
+    node.textContent = persona ? `当前由 ${persona.name} 负责名家导读。` : "当前由名家导读模式回答。";
   } else if (state.activeCharacterProfile) {
-    node.textContent = `当前使用角色 ${state.activeCharacterProfile.character_name} 进行陪读。`;
+    node.textContent = `当前由角色 ${state.activeCharacterProfile.character_name} 负责陪读。`;
   } else if (state.activeCharacterName) {
-    node.textContent = `当前准备生成角色 ${state.activeCharacterName} 的陪读视角。`;
+    node.textContent = `当前准备生成角色 ${state.activeCharacterName} 的陪读画像。`;
   } else {
-    node.textContent = "当前使用角色陪读模式，请先选择或生成一个角色。";
+    node.textContent = "先选择或生成一个角色画像，再切到角色陪读模式。";
   }
 }
 
@@ -420,15 +645,18 @@ function renderChatHistory() {
   historyNode.innerHTML = "";
   const conversation = currentConversation();
   if (!conversation.length) {
-    historyNode.innerHTML = '<p class="muted">这里会连续显示聊天记录，新的回答会自动接在后面。</p>';
+    historyNode.innerHTML = '<p class="muted">这里会连续显示名家导读或角色陪读的对话记录。</p>';
     return;
   }
   conversation.forEach((turn) => {
     const item = document.createElement("article");
     item.className = `chat-message chat-message-${turn.role}`;
-    const role = turn.role === "user" ? "你" : state.assistantMode === "persona"
-      ? getPersonaById(state.personaId)?.name || "导读 agent"
-      : state.activeCharacterProfile?.character_name || state.activeCharacterName || "角色 agent";
+    const role =
+      turn.role === "user"
+        ? "User"
+        : state.assistantMode === "persona"
+          ? getPersonaById(state.personaId)?.name || "Persona Agent"
+          : state.activeCharacterProfile?.character_name || state.activeCharacterName || "Character Agent";
     item.innerHTML = `
       <div class="chat-role">${role}</div>
       <div class="chat-content">${turn.content.replace(/\n/g, "<br />")}</div>
@@ -575,9 +803,7 @@ function setPage(pageIndex) {
   }
   renderReaderHeader();
   renderPassages();
-  fetchInlineBubbles().catch((error) => {
-    console.error(error);
-  });
+  fetchInlineBubbles().catch((error) => console.error(error));
 }
 
 async function fetchInlineBubbles() {
@@ -625,7 +851,7 @@ async function loadCharacterCandidates() {
     renderCharacterCandidates();
     return;
   }
-  setButtonLoading("character-generate-btn", true, "加载候选中...");
+  setButtonLoading("character-generate-btn", true, "正在读取角色候选...");
   try {
     state.characterCandidates = await fetchJSON(
       `/api/books/${state.activeBook}/characters?current_chapter=${state.activeChapter}&limit=12`
@@ -634,7 +860,7 @@ async function loadCharacterCandidates() {
   } catch (error) {
     state.characterCandidates = [];
     renderCharacterCandidates();
-    document.getElementById("character-profile-card").innerHTML = `<p class="muted">角色候选加载失败：${error.message}</p>`;
+    document.getElementById("character-profile-card").innerHTML = `<p class="muted">角色候选读取失败：${error.message}</p>`;
   } finally {
     setButtonLoading("character-generate-btn", false);
   }
@@ -648,13 +874,14 @@ async function generateCharacterProfile() {
   const selectedName = document.getElementById("character-select").value.trim();
   const characterName = typedName || selectedName;
   if (!characterName) {
-    document.getElementById("character-profile-card").innerHTML = "<p class=\"muted\">请先选择或输入一个角色名。</p>";
+    document.getElementById("character-profile-card").innerHTML =
+      '<p class="muted">请先选择一个角色，或手动输入角色名后再生成画像。</p>';
     return;
   }
   state.activeCharacterName = characterName;
   renderAssistantStatus();
-  setButtonLoading("character-generate-btn", true, "生成画像中...");
-  setPendingState(true, "正在生成角色画像");
+  setButtonLoading("character-generate-btn", true, "正在生成角色画像...");
+  startPendingWorkflow("characterProfile", "building-profile");
   try {
     const profile = await fetchJSON(`/api/books/${state.activeBook}/characters/profile`, {
       method: "POST",
@@ -672,10 +899,14 @@ async function generateCharacterProfile() {
     if (state.assistantMode === "character") {
       await fetchInlineBubbles();
     }
+    finishPendingWorkflow("done", "Character Profile Ready", "角色画像已经生成，可以直接继续角色陪读。");
   } catch (error) {
     document.getElementById("character-profile-card").innerHTML = `<p class="muted">角色画像生成失败：${error.message}</p>`;
-  } finally {
     setPendingState(false, "idle");
+  } finally {
+    if (state.pendingWorkflow) {
+      releasePendingState();
+    }
     setButtonLoading("character-generate-btn", false);
   }
 }
@@ -757,19 +988,29 @@ async function uploadBook(event) {
   if (!input.files[0]) {
     return;
   }
-  setPendingState(true, "正在导入书籍");
+  setPendingState(true, "starting-upload");
   try {
     const payload = new FormData();
     payload.append("file", input.files[0]);
-    const uploaded = await fetchJSON("/api/upload", { method: "POST", body: payload });
+    const job = await fetchJSON("/api/upload-jobs", { method: "POST", body: payload });
+    applyUploadJobState(job);
+    const uploaded = await waitForUploadJob(job.job_id);
     await loadBooks();
     await openBook(uploaded.book_id);
     input.value = "";
+    finishPendingWorkflow(
+      "done",
+      "Temporal Graph Ready",
+      `《${uploaded.book_title || uploaded.title}》已经完成章节切分、episode 构建与 temporal graph 写入。`
+    );
   } catch (error) {
     pushConversation("assistant", `导入失败：${error.message}`);
     renderChatHistory();
-  } finally {
     setPendingState(false, "idle");
+  } finally {
+    if (state.pendingWorkflow) {
+      releasePendingState();
+    }
   }
 }
 
@@ -790,8 +1031,11 @@ async function askAssistant() {
   pushConversation("user", question);
   renderChatHistory();
   renderComposerQuestion("");
-  setButtonLoading("ask-btn", true, "发送中...");
-  setPendingState(true, state.assistantMode === "persona" ? "名家导读正在回答" : "角色陪读正在回答");
+  setButtonLoading("ask-btn", true, "正在思考...");
+  startPendingWorkflow(
+    state.assistantMode === "persona" ? "personaQa" : "characterQa",
+    state.assistantMode === "persona" ? "persona-answering" : "character-answering"
+  );
 
   try {
     let answer = "";
@@ -811,7 +1055,7 @@ async function askAssistant() {
       answer = response.answer;
     } else {
       if (!state.activeCharacterName) {
-        throw new Error("请先生成一个角色画像，再进入角色陪读对话。");
+        throw new Error("请先生成或选择一个角色画像，再发起角色陪读问答。");
       }
       const response = await fetchJSON(`/api/books/${state.activeBook}/characters/chat`, {
         method: "POST",
@@ -830,12 +1074,22 @@ async function askAssistant() {
     }
     pushConversation("assistant", answer);
     renderChatHistory();
+    finishPendingWorkflow(
+      "done",
+      state.assistantMode === "persona" ? "Persona Answer Ready" : "Character Answer Ready",
+      state.assistantMode === "persona"
+        ? "名家 agent 已完成图谱检索、persona RAG 与防剧透过滤后的回答。"
+        : "角色陪读 agent 已完成当前可见范围内的角色化回答。"
+    );
   } catch (error) {
-    pushConversation("assistant", `当前请求失败：${error.message}`);
+    pushConversation("assistant", `问答失败：${error.message}`);
     renderChatHistory();
+    setPendingState(false, "idle");
   } finally {
     setButtonLoading("ask-btn", false);
-    setPendingState(false, "idle");
+    if (state.pendingWorkflow) {
+      releasePendingState();
+    }
   }
 }
 
@@ -843,8 +1097,8 @@ async function summarizeChapter() {
   if (!state.activeBook) {
     return;
   }
-  setButtonLoading("summary-btn", true, "总结生成中...");
-  setPendingState(true, "正在生成章节总结");
+  setButtonLoading("summary-btn", true, "正在生成总结...");
+  startPendingWorkflow("chapterSummary", "chapter-summary");
   try {
     const response = await fetchJSON("/api/summary", {
       method: "POST",
@@ -859,12 +1113,16 @@ async function summarizeChapter() {
     renderAssistantMode();
     pushConversation("assistant", response.summary);
     renderChatHistory();
+    finishPendingWorkflow("done", "Chapter Summary Ready", "当前章节总结已经基于已读 episode 与时序图状态生成完成。");
   } catch (error) {
     pushConversation("assistant", `章节总结失败：${error.message}`);
     renderChatHistory();
+    setPendingState(false, "idle");
   } finally {
     setButtonLoading("summary-btn", false);
-    setPendingState(false, "idle");
+    if (state.pendingWorkflow) {
+      releasePendingState();
+    }
   }
 }
 
@@ -901,10 +1159,8 @@ function wireEvents() {
   });
   document.getElementById("paragraph-jump").addEventListener("change", (event) => {
     const targetValue = event.target.value;
-    const pageItems = getCurrentPageItems();
-    const passage = getCurrentPassages().find(
-      (item, index) => String(item.paragraph_index ?? index + 1) === targetValue
-    );
+    const allPassages = getCurrentPassages();
+    const passage = allPassages.find((item, index) => String(item.paragraph_index ?? index + 1) === targetValue);
     if (!passage) {
       return;
     }
@@ -914,7 +1170,9 @@ function wireEvents() {
     if (pageIndex >= 0) {
       state.activePageIndex = pageIndex;
     }
-    selectPassage(passage, 0, pageItems.length ? pageItems : getCurrentPassages());
+    const pageItems = getCurrentPageItems();
+    const indexInPage = pageItems.findIndex((item) => item.chunk_id === passage.chunk_id);
+    selectPassage(passage, Math.max(0, indexInPage), pageItems.length ? pageItems : allPassages);
   });
   document.getElementById("prev-page-btn").addEventListener("click", () => setPage(state.activePageIndex - 1));
   document.getElementById("next-page-btn").addEventListener("click", () => setPage(state.activePageIndex + 1));
@@ -927,6 +1185,7 @@ function wireEvents() {
 
 async function bootstrap() {
   wireEvents();
+  renderPendingWorkflow();
   renderReaderHeader();
   renderSelectionPreview();
   renderCharacterProfile();

@@ -234,6 +234,7 @@ class OrchestrationService:
                 temporal_graph,
                 query=retrieval_request.query,
                 max_chapter=retrieval_request.reading_progress.chapter_id,
+                max_paragraph=retrieval_request.reading_progress.paragraph_id,
                 top_k=retrieval_request.top_k,
             )
             hits: list[RetrievalHit] = []
@@ -252,7 +253,7 @@ class OrchestrationService:
                         score=round(hit.score, 4),
                         text=payload.get("text") or payload.get("summary") or payload.get("label") or hit.reason,
                         chapter_id=hit.chapter_index or (provenance.chapter_index if provenance else 0),
-                        section_id=section_id,
+                        section_id=self._safe_int(section_id),
                         paragraph_id=paragraph_id,
                         metadata=payload,
                     )
