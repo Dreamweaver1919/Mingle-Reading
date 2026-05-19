@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Graph 3D — Mingle Reading</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+</script>
+<style>
+  :root {
+    --bg: #0f0f14; --panel: #18181f; --line: #2a2a35;
+    --text: #d4d4d8; --muted: #8b8b96; --accent: #5ec4c4;
+    --character: #3a7ca5; --location: #5c8a4a; --group: #c77d2a;
+    --artifact: #b0803c; --concept: #9b5fc0; --unknown: #666;
+    --community-colors: #e67e22 #2ecc71 #9b59b6 #f1c40f #e74c3c #1abc9c #f39c12 #3498db;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 20px; display: flex; align-items: center; gap: 16px; flex-shrink: 0; z-index: 10; }
+  header h1 { font-size: 1.1rem; font-weight: 700; white-space: nowrap; }
+  header select { padding: 5px 10px; border: 1px solid var(--line); border-radius: 5px; font-size: 0.85rem; background: var(--bg); color: var(--text); }
+
+  .toolbar { background: var(--panel); border-bottom: 1px solid var(--line); padding: 8px 20px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; z-index: 10; }
+  .toolbar label { font-size: 0.8rem; color: var(--muted); }
+  .toolbar input[type=range] { width: 120px; accent-color: var(--accent); }
+  .range-group { display: flex; align-items: center; gap: 5px; }
+  .range-group span { font-size: 0.78rem; min-width: 28px; color: var(--text); }
+  button { padding: 5px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--text); cursor: pointer; font-size: 0.82rem; }
+  button:hover { background: var(--line); }
+  .stats { font-size: 0.8rem; color: var(--muted); margin-left: auto; }
+
+  main { display: flex; flex: 1; overflow: hidden; position: relative; }
+  #three-container { flex: 1; position: relative; }
+  #three-container canvas { display: block; }
+
+  #sidebar { width: 300px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; z-index: 5; }
+  #sidebar h3 { font-size: 0.9rem; margin-bottom: 4px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  .type-badge { display: inline-block; padding: 1px 7px; border-radius: 8px; font-size: 0.72rem; color: #fff; margin-left: 4px; }
+  #detail-card .name { font-size: 1rem; font-weight: 700; }
+  #detail-card p { font-size: 0.8rem; margin-top: 3px; color: var(--muted); }
+
+  .community-list { display: flex; flex-wrap: wrap; gap: 3px; }
+  .com-tag { padding: 2px 7px; border-radius: 8px; font-size: 0.72rem; color: #fff; }
+  .saga-item { padding: 5px 7px; border-radius: 5px; background: var(--bg); margin-bottom: 3px; font-size: 0.78rem; }
+  .saga-item strong { display: block; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px; font-size: 0.75rem; }
+  .legend-item { display: flex; align-items: center; gap: 3px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  .tooltip-3d { position: absolute; padding: 6px 10px; background: rgba(20,20,30,0.94); color: #eee; border-radius: 5px; font-size: 0.78rem; pointer-events: none; max-width: 280px; z-index: 20; border: 1px solid rgba(255,255,255,0.1); display: none; }
+  .hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; color: var(--muted); pointer-events: none; z-index: 5; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Mingle Reading — 3D Knowledge Graph</h1>
+  <select id="book-select"><option value="">Loading...</option></select>
+</header>
+
+<div class="toolbar">
+  <div class="range-group">
+    <label>From Ch</label>
+    <input type="range" id="from-chapter" min="1" max="23" value="1" step="1">
+    <span id="from-val">1</span>
+  </div>
+  <div class="range-group">
+    <label>To Ch</label>
+    <input type="range" id="to-chapter" min="1" max="23" value="23" step="1">
+    <span id="to-val">23</span>
+  </div>
+  <button id="refresh-btn">Refresh</button>
+  <span class="stats" id="graph-stats"></span>
+</div>
+
+<main>
+  <div id="three-container">
+    <div id="tooltip-3d" class="tooltip-3d"></div>
+    <div class="hint">Drag to rotate · Scroll to zoom · Right-drag to pan · Click nodes/edges for details</div>
+  </div>
+
+  <div id="sidebar">
+    <div>
+      <h3>Legend</h3>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-dot" style="background:var(--character)"></span> Character</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--location)"></span> Location</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--group)"></span> Group</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--artifact)"></span> Artifact</div>
+        <div class="legend-item"><span class="legend-dot" style="background:var(--concept)"></span> Concept</div>
+      </div>
+    </div>
+
+    <div id="detail-card">
+      <p class="muted">Click a node or edge to inspect details</p>
+    </div>
+
+    <div>
+      <h3>Communities</h3>
+      <div id="community-list" class="community-list"></div>
+    </div>
+
+    <div>
+      <h3>Sagas</h3>
+      <div id="saga-list"></div>
+    </div>
+  </div>
+</main>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+const COLORS = {
+  character: 0x3a7ca5, location: 0x5c8a4a, group: 0xc77d2a,
+  artifact: 0xb0803c, concept: 0x9b5fc0, unknown: 0x666666
+};
+const COMM_COLORS = ["#e67e22","#2ecc71","#9b59b6","#f1c40f","#e74c3c","#1abc9c","#f39c12","#3498db"];
+
+const state = { bookId: "", data: null, chapterCount: 23 };
+
+let scene, camera, renderer, labelRenderer, controls;
+let nodeMeshes = [], edgeLines = [];
+
+async function loadBooks() {
+  const books = await fetch("/api/books").then(r => r.json());
+  const sel = document.getElementById("book-select");
+  sel.innerHTML = books.map(b => `<option value="${b.book_id}">${b.title}</option>`).join("");
+  const target = books.find(b => b.book_id.includes('百年孤独')) || books.find(b => b.book_id.includes('特立独行')) || books[books.length - 1];
+  if (target) { state.bookId = target.book_id; sel.value = state.bookId; }
+  await loadGraph();
+}
+
+async function loadGraph() {
+  const fromCh = +document.getElementById("from-chapter").value;
+  const toCh = +document.getElementById("to-chapter").value;
+  const url = `/api/books/${state.bookId}/graph/view?scope=book&chapter=${toCh}&from_chapter=${fromCh}&limit=200`;
+  state.data = await fetch(url).then(r => r.json());
+  document.getElementById("to-chapter").max = state.chapterCount || 23;
+  document.getElementById("graph-stats").textContent =
+    `${state.data.stats.node_count} nodes / ${state.data.stats.edge_count} edges / ${state.data.stats.saga_count||0} sagas`;
+  render3D();
+  renderSidebar();
+}
+
+function initThree() {
+  const container = document.getElementById("three-container");
+  const W = container.clientWidth, H = container.clientHeight;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0f0f14);
+
+  camera = new THREE.PerspectiveCamera(55, W / H, 1, 5000);
+  camera.position.set(0, 0, 400);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  container.appendChild(renderer.domElement);
+
+  labelRenderer = new CSS2DRenderer();
+  labelRenderer.setSize(W, H);
+  labelRenderer.domElement.style.position = "absolute";
+  labelRenderer.domElement.style.top = "0";
+  labelRenderer.domElement.style.pointerEvents = "none";
+  container.appendChild(labelRenderer.domElement);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+  controls.minDistance = 50;
+  controls.maxDistance = 1500;
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0x404060, 1.5));
+  const dir = new THREE.DirectionalLight(0xffffff, 1);
+  dir.position.set(1, 1, 1);
+  scene.add(dir);
+
+  window.addEventListener("resize", () => {
+    const w = container.clientWidth, h = container.clientHeight;
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderer.setSize(w, h); labelRenderer.setSize(w, h);
+  });
+}
+
+function render3D() {
+  // Clear old
+  if (!scene) { initThree(); } else {
+    nodeMeshes.forEach(m => scene.remove(m)); edgeLines.forEach(l => scene.remove(l));
+    nodeMeshes = []; edgeLines = [];
+  }
+
+  const nodes = state.data.nodes || [];
+  const edges = state.data.edges || [];
+  if (!nodes.length) return;
+
+  const nodeMap = {};
+  const meshMap = {};
+
+  // Run D3 force simulation for 3D layout
+  const simNodes = nodes.map(n => ({ ...n }));
+  const simEdges = edges.map(e => ({ source: e.source, target: e.target }));
+  const sim = d3.forceSimulation(simNodes)
+    .force("link", d3.forceLink(simEdges).id(d => d.id).distance(80))
+    .force("charge", d3.forceManyBody().strength(-150))
+    .force("center", d3.forceCenter(0, 0))
+    .stop();
+  for (let i = 0; i < 200; i++) sim.tick();
+
+  // Create 3D objects
+  simNodes.forEach(n => {
+    const r = Math.max(3, Math.min(12, 3 + (n.mention_count || 1) * 0.8));
+    const color = COLORS[n.type] || COLORS.unknown;
+    const geo = new THREE.SphereGeometry(r, 24, 16);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.2 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(n.x || 0, n.y || 0, n.z || 0);
+    mesh.userData = { node: n, isNode: true };
+    scene.add(mesh);
+    nodeMeshes.push(mesh);
+    meshMap[n.id] = mesh;
+
+    // Label
+    const div = document.createElement("div");
+    div.textContent = n.label.length > 8 ? n.label.slice(0,8)+"…" : n.label;
+    div.style.cssText = `color:#ccc;font-size:9px;text-shadow:0 0 4px #000;pointer-events:none;`;
+    const label = new CSS2DObject(div);
+    label.position.copy(mesh.position).add(new THREE.Vector3(0, r + 6, 0));
+    scene.add(label);
+    nodeMeshes.push(label);
+  });
+
+  simEdges.forEach(e => {
+    const src = meshMap[e.source.id || e.source];
+    const tgt = meshMap[e.target.id || e.target];
+    if (!src || !tgt) return;
+    const mid = new THREE.Vector3().addVectors(src.position, tgt.position).multiplyScalar(0.5);
+    const dir = new THREE.Vector3().subVectors(tgt.position, src.position);
+    const len = dir.length();
+    const geo = new THREE.CylinderGeometry(0.3, 0.3, len, 6);
+    const mat = new THREE.MeshBasicMaterial({
+      color: e.status === "active" ? 0x8899aa : 0x444455,
+      transparent: true, opacity: e.status === "active" ? 0.5 : 0.25
+    });
+    const cyl = new THREE.Mesh(geo, mat);
+    cyl.position.copy(mid);
+    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    cyl.userData = { edge: e, isEdge: true };
+    scene.add(cyl);
+    edgeLines.push(cyl);
+  });
+
+  // Stars background
+  const starGeo = new THREE.BufferGeometry();
+  const starVerts = [];
+  for (let i = 0; i < 600; i++) {
+    starVerts.push((Math.random() - 0.5) * 1200, (Math.random() - 0.5) * 1200, (Math.random() - 0.5) * 1200);
+  }
+  starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starVerts, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x555577, size: 1 }));
+  scene.add(stars);
+  nodeMeshes.push(stars);
+}
+
+// --- Raycaster for hover/click ---
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 2;
+raycaster.params.Line = { threshold: 0.5 };
+const mouse = new THREE.Vector2();
+const tooltip = document.getElementById("tooltip-3d");
+
+function onMouseMove(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(nodeMeshes.filter(m => m.isMesh));
+
+  if (hits.length) {
+    const obj = hits[0].object;
+    if (obj.userData.isNode) {
+      const n = obj.userData.node;
+      tooltip.style.display = "block";
+      tooltip.innerHTML = `<strong>${n.label}</strong> <span style="color:#999">${n.type}</span><br>Mentions: ${n.mention_count||0} · First: ch${n.first_seen_chapter||"?"}<br>${n.summary||""}`;
+    } else if (obj.userData.isEdge) {
+      const e = obj.userData.edge;
+      tooltip.style.display = "block";
+      tooltip.innerHTML = `<strong>${e.label}</strong> <span style="color:#999">${e.state_family||""}</span><br>${e.fact||""}<br>Ch${e.valid_at_chapter||"?"} · ${e.status}`;
+    }
+    tooltip.style.left = (event.clientX + 14) + "px";
+    tooltip.style.top = (event.clientY + 14) + "px";
+  } else {
+    tooltip.style.display = "none";
+  }
+}
+
+function onClick(event) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(nodeMeshes.filter(m => m.isMesh));
+  if (!hits.length) return;
+
+  const obj = hits[0].object;
+  const card = document.getElementById("detail-card");
+  if (obj.userData.isNode) {
+    const n = obj.userData.node;
+    card.innerHTML = `<div class="name">${n.label}<span class="type-badge" style="background:#${COLORS[n.type]?.toString(16).padStart(6,'0')||'666'}">${n.type}</span></div>
+      <p>Mentions: ${n.mention_count||0} · First seen: ch${n.first_seen_chapter||"?"}</p><p>${n.summary||""}</p>`;
+  } else if (obj.userData.isEdge) {
+    const e = obj.userData.edge;
+    card.innerHTML = `<div class="name">${e.label} <span class="type-badge" style="background:#666">${e.state_family||""}</span></div>
+      <p>${e.fact||""}</p><p>Ch${e.valid_at_chapter||"?"} · ${e.status} · weight: ${e.weight||1}</p>`;
+  }
+}
+
+function renderSidebar() {
+  const comms = state.data.communities || [];
+  document.getElementById("community-list").innerHTML = comms.length
+    ? comms.map((c,i) => `<span class="com-tag" style="background:${COMM_COLORS[i%COMM_COLORS.length]}">${c.label||`C${i+1}`} (${c.entity_count})</span>`).join("")
+    : '<span style="color:var(--muted);font-size:0.78rem">None in range</span>';
+
+  const sagas = state.data.sagas || [];
+  document.getElementById("saga-list").innerHTML = sagas.length
+    ? sagas.map(s => `<div class="saga-item"><strong>${s.label}</strong>Ch${s.chapter_start}-${s.chapter_end}, ${s.entity_count} entities<div style="font-size:0.72rem;color:var(--muted)">${s.summary||""}</div></div>`).join("")
+    : '<span style="color:var(--muted);font-size:0.78rem">None in range</span>';
+}
+
+// Animation loop
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+document.getElementById("refresh-btn").addEventListener("click", loadGraph);
+document.getElementById("book-select").addEventListener("change", e => { state.bookId = e.target.value; loadGraph(); });
+document.getElementById("from-chapter").addEventListener("input", e => { document.getElementById("from-val").textContent = e.target.value; });
+document.getElementById("to-chapter").addEventListener("input", e => { document.getElementById("to-val").textContent = e.target.value; });
+document.getElementById("three-container").addEventListener("mousemove", onMouseMove);
+document.getElementById("three-container").addEventListener("click", onClick);
+
+initThree();
+animate();
+loadBooks();
+</script>
+</body>
+</html>

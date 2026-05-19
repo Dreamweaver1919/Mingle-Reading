@@ -1,7 +1,7 @@
 {
   "registry_id": "persona_lead_readers_registry_v001",
   "generated_on": "2026-05-13",
-  "purpose": "Lead-reader persona assets curated for temporal graph-backed Muse Reading retrieval and commentary.",
+  "purpose": "Lead-reader persona assets curated for temporal graph-backed Mingle Reading retrieval and commentary.",
   "graph_mapping": {
     "persona_node_type": "persona",
     "source_node_type": "persona_source",

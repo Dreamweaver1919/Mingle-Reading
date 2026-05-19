@@ -1,6 +1,6 @@
 # Persona Agent Configuration
 
-Muse Reading 当前的三位名家 agent 已不再依赖旧的 `persona pack / catalog / persona_kb` 目录作为主数据源。
+Mingle Reading 当前的三位名家 agent 已不再依赖旧的 `persona pack / catalog / persona_kb` 目录作为主数据源。
 
 当前唯一的名家资料来源是：
 

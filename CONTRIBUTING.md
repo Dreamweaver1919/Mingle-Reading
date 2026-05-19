@@ -1,6 +1,6 @@
 # 参与贡献
 
-感谢你帮助改进 Muse Reading。当前仓库是一个基于以下技术构建的轻量级 Python MVP：
+感谢你帮助改进 Mingle Reading。当前仓库是一个基于以下技术构建的轻量级 Python MVP：
 
 - `FastAPI` 作为 API 层
 - `frontend/` 中的静态前端

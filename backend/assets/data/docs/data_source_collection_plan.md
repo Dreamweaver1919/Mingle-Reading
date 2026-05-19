@@ -1,6 +1,6 @@
-# Muse Reading 数据来源搜集执行清单
+# Mingle Reading 数据来源搜集执行清单
 
-本文在 [backend/docs/data/muse_reading_data_design.md](/C:/Users/21358/Desktop/MuseReading/backend/docs/data/muse_reading_data_design.md)、[backend/docs/architecture_alignment.md](/C:/Users/21358/Desktop/MuseReading/backend/docs/architecture_alignment.md) 与 [backend/assets/data/README.md](/C:/Users/21358/Desktop/MuseReading/backend/assets/data/README.md) 基础上整理，目标是给团队一份可以直接分工执行的数据来源搜集计划。
+本文在 [backend/docs/data/mingle_reading_data_design.md](/C:/Users/21358/Desktop/MingleReading/backend/docs/data/mingle_reading_data_design.md)、[backend/docs/architecture_alignment.md](/C:/Users/21358/Desktop/MingleReading/backend/docs/architecture_alignment.md) 与 [backend/assets/data/README.md](/C:/Users/21358/Desktop/MingleReading/backend/assets/data/README.md) 基础上整理，目标是给团队一份可以直接分工执行的数据来源搜集计划。
 
 ## 1. 执行目标
 

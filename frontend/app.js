@@ -151,7 +151,7 @@ const state = {
   },
 };
 
-const LAST_OPENED_BOOK_KEY = "muse-reading:last-opened-book";
+const LAST_OPENED_BOOK_KEY = "mingle-reading:last-opened-book";
 
 async function fetchJSON(url, options = {}) {
   const controller = new AbortController();
@@ -554,7 +554,7 @@ function renderCharacterCandidates() {
   state.characterCandidates.forEach((candidate) => {
     const option = document.createElement("option");
     option.value = candidate.character_name;
-    option.textContent = `${candidate.character_name} 路 ${candidate.mention_count}`;
+    option.textContent = `${candidate.character_name} (${candidate.mention_count})`;
     select.appendChild(option);
   });
 
@@ -912,7 +912,7 @@ function renderGraphPanel() {
         return;
       }
       detail.innerHTML = `
-        <strong>${escapeHtml(node.label)}</strong> 路 ${escapeHtml(node.type || "entity")}<br />
+        <strong>${escapeHtml(node.label)}</strong> · ${escapeHtml(node.type || "entity")}<br />
         Mentions: ${node.mention_count || 0}<br />
         First seen: chapter ${node.first_seen_chapter || "-"}, paragraph ${node.first_seen_paragraph || "-"}<br />
         ${escapeHtml(node.summary || "No summary available for this node.")}
@@ -928,7 +928,7 @@ function renderGraphPanel() {
         return;
       }
       detail.innerHTML = `
-        <strong>${escapeHtml(edge.label)}</strong> 路 ${escapeHtml(edge.state_family || "relation")}<br />
+        <strong>${escapeHtml(edge.label)}</strong> · ${escapeHtml(edge.state_family || "relation")}<br />
         Valid at: chapter ${edge.valid_at_chapter || "-"}, paragraph ${edge.valid_at_paragraph || "-"}<br />
         Status: ${escapeHtml(edge.status || "unknown")}<br />
         ${escapeHtml(edge.fact || "No fact string is available for this relation.")}
@@ -1152,7 +1152,7 @@ async function loadCharacterCandidates() {
   setButtonLoading("character-generate-btn", true, "Loading candidates...");
   try {
     state.characterCandidates = await fetchJSON(
-      `/api/books/${state.activeBook}/characters?current_chapter=${state.activeChapter}&limit=12`
+      `/api/books/${state.activeBook}/characters?current_chapter=${state.activeChapter}&limit=200`
     );
     renderCharacterCandidates();
   } catch (error) {

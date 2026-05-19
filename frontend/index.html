@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Muse Reading</title>
+    <title>Mingle Reading</title>
     <link rel="stylesheet" href="/static/main.css?v=20260519-clean-ui" />
   </head>
   <body>
     <div class="app-frame">
       <header class="topbar">
         <div class="topbar-brand">
-          <p class="eyebrow">Muse Reading</p>
+          <p class="eyebrow">Mingle Reading</p>
           <h1>AI Reading Workspace</h1>
         </div>
         <nav class="topbar-tabs" aria-label="workspace tabs">
@@ -96,7 +96,7 @@
             </div>
             <div class="stack">
               <label class="label" for="character-select">Character Candidates</label>
-              <select id="character-select" aria-label="Choose book character"></select>
+              <select id="character-select" aria-label="Choose book character" size="10" style="width:100%;overflow-y:auto"></select>
               <label class="label" for="character-input">Or enter a character name manually</label>
               <input id="character-input" class="text-input" type="text" placeholder="Enter a character name and build a profile" />
               <button id="character-generate-btn" class="secondary-button" type="button">Build Character Profile</button>

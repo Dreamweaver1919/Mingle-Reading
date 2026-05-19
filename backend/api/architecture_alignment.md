@@ -1,4 +1,4 @@
-# Muse Reading 架构对齐说明
+# Mingle Reading 架构对齐说明
 
 本文基于现有材料整理，不另起炉灶，重点对齐已经出现过的产品目标、系统模块、数据资产与评测边界。
 
@@ -6,7 +6,7 @@
 
 - `backend/docs/_source_notes/Opening Report v3(1).txt`
 - `backend/docs/_source_notes/Opening Report pre.txt`
-- `backend/docs/_source_notes/Muse Reading_数据集构建方案与评测基准设计.txt`
+- `backend/docs/_source_notes/Mingle Reading_数据集构建方案与评测基准设计.txt`
 - `backend/docs/_source_notes/数据集构建与模型评测.txt`
 - `backend/docs/_source_notes/渐进式节拍记忆系统(PBM)数据集介绍 (1)(1).txt`
 
@@ -18,8 +18,8 @@
 
 - `Web Reader Interface`：打开书籍、正文渲染、章节导航、滚动定位。
 - `Selection/Highlight`：选中文本、创建高亮、触发解释/提问。
-- `Chat Sidebar / Muse Talk`：承载问答、引导式对话、章节总结。
-- `Intelligent Bubble / Muse Spark`：行内提示、角色气泡、主动注释。
+- `Chat Sidebar / Mingle Talk`：承载问答、引导式对话、章节总结。
+- `Intelligent Bubble / Mingle Spark`：行内提示、角色气泡、主动注释。
 - `Notes & Highlights`：保存笔记、高亮、书签、摘录。
 - `Reading Progress Tracker`：记录 chapter/section/scroll/dwell time，作为后端的单一进度事实源。
 
@@ -51,7 +51,7 @@
 
 ## 2. 模块间输入输出定义
 
-详细接口建议见 [system_interfaces.md](/C:/Users/21358/Desktop/MuseReading/architecture/system_interfaces.md)。这里先给系统级数据流。
+详细接口建议见 [system_interfaces.md](/C:/Users/21358/Desktop/MingleReading/architecture/system_interfaces.md)。这里先给系统级数据流。
 
 ### 2.1 核心在线链路
 
@@ -131,7 +131,7 @@
 
 ## 4. 对 README 友好的系统架构摘要
 
-Muse Reading 是一个构建在 `SageRead` 阅读器之上的 AI 陪读系统。它以阅读进度为单一事实源，将用户的选中片段、提问、停留行为送入多 Agent 编排层，再通过带元数据过滤的 RAG 检索出当前可见范围内的书本文本、作者资料或角色上下文，生成作者视角讲解、角色对话、章节总结与行内气泡提示。
+Mingle Reading 是一个构建在 `SageRead` 阅读器之上的 AI 陪读系统。它以阅读进度为单一事实源，将用户的选中片段、提问、停留行为送入多 Agent 编排层，再通过带元数据过滤的 RAG 检索出当前可见范围内的书本文本、作者资料或角色上下文，生成作者视角讲解、角色对话、章节总结与行内气泡提示。
 
 系统的关键不是“让模型会聊天”，而是把四件事绑定在一起：
 

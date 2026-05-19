@@ -692,7 +692,7 @@ def build_hierarchical_dataset(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build Muse Reading hierarchical dataset artifacts.")
+    parser = argparse.ArgumentParser(description="Build Mingle Reading hierarchical dataset artifacts.")
     parser.add_argument("input", type=Path, help="Input .txt, raw text json, or serialized BookRecord json.")
     parser.add_argument(
         "--output-dir",

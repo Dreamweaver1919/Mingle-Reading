@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 from threading import Thread
@@ -37,6 +37,7 @@ from backend.agents.character.service import (
     list_character_candidates,
 )
 from backend.knowledge_graph.builder import TemporalGraphBuilder, build_temporal_graph
+from backend.knowledge_graph.build_logger import GraphBuildLogger
 from backend.knowledge_graph.models import GraphQuery
 from backend.knowledge_graph.retrieval import TemporalGraphRetriever
 from backend.knowledge_graph.storage import load_graph, load_graph_metadata, save_graph
@@ -55,7 +56,7 @@ from backend.agents.celebrity.persona_service import (
 from backend.agents.celebrity.chapter_summary import summarize_chapter
 
 
-app = FastAPI(title="Muse Reading MVP", version="0.1.0")
+app = FastAPI(title="Mingle Reading MVP", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -148,7 +149,12 @@ def _process_upload_job(job_id: str, *, original_name: str, suffix: str, raw_byt
         def graph_progress(payload: dict) -> None:
             _update_upload_job(job_id, **payload)
 
-        graph = TemporalGraphBuilder(progress_callback=graph_progress, strict_llm_extraction=True).build(record)
+        build_log = GraphBuildLogger(book_id=record.book_id, title=record.title)
+        graph = TemporalGraphBuilder(
+            progress_callback=graph_progress,
+            strict_llm_extraction=True,
+            build_logger=build_log,
+        ).build(record)
 
         _update_upload_job(
             job_id,
@@ -219,7 +225,7 @@ def _process_upload_job(job_id: str, *, original_name: str, suffix: str, raw_byt
 
 
 def ensure_demo_book_loaded() -> None:
-    demo_path = EXAMPLES_DIR / "muse_demo_book.txt"
+    demo_path = EXAMPLES_DIR / "mingle_demo_book.txt"
     if not demo_path.exists():
         return
     book_id = slugify(demo_path.stem)
@@ -464,7 +470,8 @@ def graph_metadata(book_id: str):
 
 
 @app.get("/api/books/{book_id}/graph/view")
-def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 18, scope: str = "chapter"):
+def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 18, scope: str = "chapter",
+               from_chapter: int = 0):
     graph = get_or_build_graph(book_id)
     normalized_scope = scope.lower().strip()
     if normalized_scope not in {"chapter", "book"}:
@@ -472,6 +479,7 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
     full_book_chapter = max((item.chapter_index for item in graph.chapter_timeline), default=chapter)
     effective_chapter = full_book_chapter if normalized_scope == "book" else chapter
     max_paragraph = None if normalized_scope == "book" else (paragraph if paragraph and paragraph > 0 else None)
+    min_chapter = from_chapter if from_chapter > 0 else 0
     chapter_key = f"chapter_{chapter:03d}"
     chapter_node = graph.chapters.get(chapter_key)
     timeline_entry = next((item for item in graph.chapter_timeline if item.chapter_index == chapter), None)
@@ -480,6 +488,8 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
 
     def _entity_is_visible(entity) -> bool:
         if entity.first_seen_chapter > effective_chapter:
+            return False
+        if min_chapter and entity.last_seen_chapter < min_chapter:
             return False
         if max_paragraph is None:
             return True
@@ -514,6 +524,8 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
         if relation is None:
             continue
         if not relation.is_visible(max_chapter=effective_chapter, max_paragraph=max_paragraph):
+            continue
+        if min_chapter and relation.valid_at_chapter < min_chapter:
             continue
         relation_pool.append(relation)
         selected_entity_ids.add(relation.source_entity_id)
@@ -583,6 +595,20 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
             }
         )
 
+    saga_items = []
+    for saga in graph.sagas.values():
+        if saga.chapter_end < min_chapter or saga.chapter_start > effective_chapter:
+            continue
+        saga_items.append({
+            "saga_id": saga.saga_id,
+            "label": saga.label or f"Saga {saga.saga_id}",
+            "summary": saga.summary or "",
+            "chapter_start": saga.chapter_start,
+            "chapter_end": saga.chapter_end,
+            "entity_count": len(saga.entity_ids),
+        })
+    saga_items.sort(key=lambda s: s["chapter_start"])
+
     return {
         "graph_id": graph.graph_id,
         "book_id": graph.book_id,
@@ -595,10 +621,12 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
             "node_count": len(nodes),
             "edge_count": len(edges),
             "community_count": len(community_items),
+            "saga_count": len(saga_items),
         },
         "nodes": sorted(nodes, key=lambda item: item["mention_count"], reverse=True),
         "edges": sorted(edges, key=lambda item: item["weight"], reverse=True),
         "communities": community_items,
+        "sagas": saga_items,
     }
 
 
@@ -638,7 +666,11 @@ async def upload_book(file: UploadFile = File(...)) -> UploadResponse:
         raw_bytes=raw_bytes if suffix != ".txt" else text.encode("utf-8"),
         source_path=upload_path,
     )
-    graph = TemporalGraphBuilder(strict_llm_extraction=True).build(record)
+    build_log = GraphBuildLogger(book_id=record.book_id, title=record.title)
+    graph = TemporalGraphBuilder(
+        strict_llm_extraction=True,
+        build_logger=build_log,
+    ).build(record)
     save_book(record)
     save_graph(graph)
     return UploadResponse(

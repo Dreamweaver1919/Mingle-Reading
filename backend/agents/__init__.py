@@ -1,1 +1,1 @@
-"""Agent packages for Muse Reading."""
+"""Agent packages for Mingle Reading."""

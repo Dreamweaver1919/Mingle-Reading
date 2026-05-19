@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://muse-reading.local/backend/assets/schemas/anti_spoiler_eval.schema.json",
-  "title": "Muse Reading Anti-Spoiler Evaluation Sample",
+  "$id": "https://mingle-reading.local/backend/assets/schemas/anti_spoiler_eval.schema.json",
+  "title": "Mingle Reading Anti-Spoiler Evaluation Sample",
   "type": "object",
   "required": [
     "sample_id",

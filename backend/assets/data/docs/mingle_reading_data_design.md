@@ -1,4 +1,4 @@
-# Muse Reading 数据设计
+# Mingle Reading 数据设计
 
 ## 1. 与现有材料的设计对齐
 

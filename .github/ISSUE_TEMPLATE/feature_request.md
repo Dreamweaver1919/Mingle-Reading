@@ -1,6 +1,6 @@
 ---
 name: 功能请求
-about: 提出一个符合当前 Muse Reading 方向的改进建议
+about: 提出一个符合当前 Mingle Reading 方向的改进建议
 title: "[Feature] "
 labels: enhancement
 assignees: ''

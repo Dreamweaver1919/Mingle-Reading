@@ -21,7 +21,7 @@ def _extract_content(payload: dict[str, Any]) -> str:
         raise ValueError("upstream response contained no choices")
     message = choices[0].get("message") or {}
     content = message.get("content", "")
-    if isinstance(content, str):
+    if isinstance(content, str) and content.strip():
         return content
     if isinstance(content, list):
         text_parts: list[str] = []
@@ -45,11 +45,12 @@ def invoke_openai_compatible_messages(
     response_format: dict[str, Any] | None = None,
 ) -> str:
     endpoint = _normalize_chat_completions_url(base_url)
-    payload = {
+    payload: dict[str, Any] = {
         "model": model_name,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "thinking": {"type": "disabled"},
     }
     if response_format is not None:
         payload["response_format"] = response_format
@@ -69,6 +70,8 @@ def invoke_openai_compatible_messages(
         raise RuntimeError(f"network error: {exc.reason}") from exc
     except (TimeoutError, socket.timeout) as exc:
         raise RuntimeError(f"network timeout: {exc}") from exc
+    except (ConnectionError, OSError) as exc:
+        raise RuntimeError(f"remote end closed connection: {exc}") from exc
     payload = json.loads(raw)
     return _extract_content(payload)
 

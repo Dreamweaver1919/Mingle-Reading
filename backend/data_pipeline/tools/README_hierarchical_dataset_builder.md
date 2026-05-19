@@ -7,7 +7,7 @@
   - 支持 `books` 和 `persona_sources` 模式
   - 可选择性调用层级化构建器处理 `books`
 - `backend/scripts/hierarchical_dataset_builder.py`
-  - 从一份归一化的书籍来源构建层级化 Muse Reading 数据集产物以及图谱中间导出
+  - 从一份归一化的书籍来源构建层级化 Mingle Reading 数据集产物以及图谱中间导出
 
 ## 1. 来源注册表入口点
 
@@ -93,7 +93,7 @@ backend/scripts/registry_output/
 
 - `books` 模式将 ID 归一化为小写 ASCII 加下划线，例如 `book_demo_book`。
 - `persona_sources` 模式生成 `persona_source_<slug>` 和可选的 `persona_<slug>`。
-- 原始来源文件名遵循 `backend/docs/data/muse_reading_data_design.md` 中针对书籍的模式：
+- 原始来源文件名遵循 `backend/docs/data/mingle_reading_data_design.md` 中针对书籍的模式：
   - `book_<title_slug>__source_<source_type>__v001.json`
 - 来源清单存储在 `backend/assets/data/manifests/` 下，批量注册表文件按模式分组：
   - `manifest__books__<book_id>__v001.json`

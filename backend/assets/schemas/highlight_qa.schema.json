@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://muse-reading.local/backend/assets/schemas/highlight_qa.schema.json",
-  "title": "Muse Reading Highlight QA Sample",
+  "$id": "https://mingle-reading.local/backend/assets/schemas/highlight_qa.schema.json",
+  "title": "Mingle Reading Highlight QA Sample",
   "type": "object",
   "required": [
     "sample_id",

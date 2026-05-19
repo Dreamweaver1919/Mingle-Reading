@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import re
@@ -161,51 +161,40 @@ def _sample_visible_chunks(chunks: list[BookChunk], current_chapter: int, limit:
     return sampled
 
 
-def _heuristic_character_candidates(chunks: list[BookChunk], current_chapter: int, limit: int = 10) -> list[CharacterCandidate]:
-    visible = [chunk for chunk in chunks if chunk.chapter_index <= current_chapter]
-    counter: Counter[str] = Counter()
-    chapter_hits: dict[str, set[int]] = {}
-    previews: dict[str, str] = {}
+from backend.knowledge_graph.storage import graph_exists, load_graph
 
-    english_pattern = re.compile(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?\b")
-    chinese_pattern = re.compile(r"(?<![\u4e00-\u9fff])[\u4e00-\u9fff]{2,4}(?![\u4e00-\u9fff])")
-    action_pattern = re.compile(
-        r"([\u4e00-\u9fff]{2,6})(?=说|问|答|道|想|看|望|笑|哭|站|走|来|去|坐|叫|提到|认为|觉得|回忆|转身|看着|盯着|听见)"
-    )
-    blocked = {"Chapter", "Content", "Cover", "目录"}
 
-    for chunk in visible:
-        names = list(chunk.candidate_characters)
-        names.extend(english_pattern.findall(chunk.text))
-        names.extend(action_pattern.findall(chunk.text))
-        names.extend(
-            token
-            for token in chinese_pattern.findall(chunk.text)
-            if token not in blocked and not token.endswith("说道") and not token.endswith("起来")
-        )
-        for name in names:
-            normalized = name.strip()
-            if normalized in blocked or not _is_valid_character_name(normalized):
-                continue
-            counter[normalized] += 1
-            chapter_hits.setdefault(normalized, set()).add(chunk.chapter_index)
-            previews.setdefault(normalized, chunk.text[:140])
+def _graph_character_candidates(book, current_chapter: int, limit: int = 10) -> list[CharacterCandidate]:
+    """Return character candidates from the knowledge graph, falling back to empty list if no graph exists."""
+    if not graph_exists(book.book_id):
+        return []
 
-    ranked = []
-    for name, count in counter.most_common(limit * 2):
-        if count < 2 and len(counter) > limit:
+    try:
+        graph = load_graph(book.book_id)
+    except Exception:
+        return []
+
+    candidates: list[CharacterCandidate] = []
+    for entity in graph.entities.values():
+        if entity.entity_type != "character":
             continue
-        ranked.append(
+        if entity.first_seen_chapter > current_chapter:
+            continue
+        name = entity.canonical_name
+        if not name or not name.strip():
+            continue
+        chapter_span = entity.metadata.get("chapter_span", []) if entity.metadata else []
+        candidates.append(
             CharacterCandidate(
                 character_id=f"char-{_character_slug(name)}",
                 character_name=name,
-                mention_count=count,
-                chapter_hits=sorted(chapter_hits.get(name, set())),
-                preview=previews.get(name, ""),
+                mention_count=entity.mention_count,
+                chapter_hits=sorted(chapter_span) if chapter_span else [entity.first_seen_chapter],
+                preview=entity.summary or f"{name}，从第{entity.first_seen_chapter}章到第{entity.last_seen_chapter}章出场{entity.mention_count}次。",
             )
         )
-    return ranked[:limit]
-
+    candidates.sort(key=lambda c: c.mention_count, reverse=True)
+    return candidates[:limit]
 
 def _build_model_messages(system_prompt: str, user_prompt: str, history: list[ChatMessage] | None = None) -> list[dict[str, str]]:
     messages = [{"role": "system", "content": system_prompt}]
@@ -234,60 +223,9 @@ def _invoke_runtime(persona_id: str, messages: list[dict[str, str]], *, max_toke
 def list_character_candidates(book, current_chapter: int, limit: int = 10) -> list[CharacterCandidate]:
     cache_key = (book.book_id, current_chapter)
     if cache_key in _CHARACTER_CANDIDATE_CACHE:
-        cached = [
-            candidate
-            for candidate in _CHARACTER_CANDIDATE_CACHE[cache_key]
-            if _is_valid_character_name(candidate.character_name)
-        ]
-        _CHARACTER_CANDIDATE_CACHE[cache_key] = cached
-        return cached[:limit]
+        return _CHARACTER_CANDIDATE_CACHE[cache_key][:limit]
 
-    visible_chunks = _sample_visible_chunks(book.chunks, current_chapter, limit=80)
-    evidence = "\n\n".join(
-        [f"[章节 {chunk.chapter_index} / 段落 {chunk.paragraph_index}]\n{chunk.text}" for chunk in visible_chunks[:40]]
-    )
-    system_prompt = (
-        "你是文学阅读系统中的角色抽取助手。"
-        "请从当前已读正文中找出已经实际出场、足以支持对话的角色，"
-        "只返回 JSON 数组。每个元素包含 character_name, mention_count, chapter_hits, preview。"
-        "preview 是 30 字以内的中文概述。不要返回目录项、作者、译者或章节标题。"
-    )
-    user_prompt = (
-        f"书名：{book.title}\n"
-        f"当前已读上限：第 {current_chapter} 章\n"
-        "请提取 8 到 12 个角色。如果文本里明显是英文名，也直接保留原名。\n"
-        "正文采样：\n"
-        f"{evidence}"
-    )
-
-    candidates: list[CharacterCandidate] = []
-    try:
-        answer, _ = _invoke_runtime(
-            "neutral",
-            _build_model_messages(system_prompt, user_prompt),
-            max_tokens=1000,
-            temperature=0.2,
-        )
-        payload = _extract_json_payload(answer)
-        if isinstance(payload, list):
-            for row in payload:
-                name = str(row.get("character_name", "")).strip()
-                if not _is_valid_character_name(name):
-                    continue
-                candidates.append(
-                    CharacterCandidate(
-                        character_id=f"char-{_character_slug(name)}",
-                        character_name=name,
-                        mention_count=max(1, int(row.get("mention_count", 1))),
-                        chapter_hits=[int(item) for item in row.get("chapter_hits", []) if str(item).isdigit()],
-                        preview=str(row.get("preview", "")).strip(),
-                    )
-                )
-    except Exception:
-        candidates = []
-
-    if not candidates:
-        candidates = _heuristic_character_candidates(book.chunks, current_chapter, limit=limit)
+    candidates = _graph_character_candidates(book, current_chapter, limit=200)
 
     deduped: list[CharacterCandidate] = []
     seen: set[str] = set()
@@ -299,7 +237,7 @@ def list_character_candidates(book, current_chapter: int, limit: int = 10) -> li
         deduped.append(candidate)
 
     _CHARACTER_CANDIDATE_CACHE[cache_key] = deduped
-    return deduped[:limit]
+    return deduped
 
 
 def _character_evidence(chunks: list[BookChunk], character_name: str, current_chapter: int, top_k: int = 8) -> list[BookChunk]:

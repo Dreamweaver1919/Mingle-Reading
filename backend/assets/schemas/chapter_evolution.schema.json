@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://muse-reading.local/backend/assets/schemas/chapter_evolution.schema.json",
-  "title": "Muse Reading Chapter Summary and Understanding Evolution",
+  "$id": "https://mingle-reading.local/backend/assets/schemas/chapter_evolution.schema.json",
+  "title": "Mingle Reading Chapter Summary and Understanding Evolution",
   "type": "object",
   "required": [
     "record_id",

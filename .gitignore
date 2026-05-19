@@ -41,7 +41,7 @@ htmlcov/
 # Local research source materials not required for the open-source code release
 Opening Report pre.pptx
 Opening Report v3(1).docx
-Muse Reading_数据集构建方案与评测基准设计.pptx
+Mingle Reading_数据集构建方案与评测基准设计.pptx
 数据切片方法(1).pptx
 数据集构建与模型评测.pptx
 渐进式节拍记忆系统(PBM)数据集介绍 (1)(1).pptx
@@ -49,3 +49,10 @@ _doc.xml
 
 # Local uploaded source books used for debugging
 backend/assets/data/raw/books/*.epub
+zep/
+
+# Generated runtime data (keep local only)
+backend/runtime/books/
+backend/runtime/graphs/
+backend/runtime/logs/
+backend/runtime/uploads/

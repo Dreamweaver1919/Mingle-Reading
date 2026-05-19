@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 import os
@@ -116,7 +116,7 @@ class KnownEntityCandidate(BaseModel):
 
 class ExtractedEntityCandidate(BaseModel):
     canonical_name: str
-    entity_type: GraphEntityType = "character"
+    entity_type: GraphEntityType = "unknown"
     aliases: list[str] = Field(default_factory=list)
     resolution_hint: str = ""
     evidence: str = ""
@@ -137,7 +137,7 @@ class ExtractedFactCandidate(BaseModel):
 class EpisodeGraphExtraction(BaseModel):
     entities: list[ExtractedEntityCandidate] = Field(default_factory=list)
     facts: list[ExtractedFactCandidate] = Field(default_factory=list)
-    extraction_mode: Literal["llm-assisted", "heuristic"] = "llm-assisted"
+    extraction_mode: Literal["llm-assisted"] = "llm-assisted"
     provider_label: str = ""
     raw_response: str = ""
 
@@ -227,26 +227,58 @@ def extract_episode_graph_with_llm(
 def _build_system_prompt() -> str:
     return "\n".join(
         [
-            "You extract Graphiti-style temporal knowledge graph updates from literary text.",
-            "Treat the current paragraph as one canonical episode.",
-            "Resolve mentions to stable entities when the text and known-entity list support it.",
-            "Return strict JSON only. Do not use markdown fences.",
-            'Use this schema: {"entities":[...],"facts":[...]}',
-            "Each entity item must contain canonical_name, entity_type, aliases, resolution_hint, evidence, confidence.",
-            "Each fact item must contain source, target, relation_type, state_family, directionality, fact, evidence, confidence.",
-            "Only emit facts directly supported by the provided paragraph or immediate local context.",
-            "Do not infer future events or hidden facts.",
-            "Use directionality=directed only when source -> target matters.",
-            'If there is no confident extraction, return {"entities":[],"facts":[]}.',
-            "Preferred relation/state families:",
-            "- LOCATED_IN -> location",
-            "- MEMBER_OF -> membership",
-            "- SPOKE_WITH -> interaction",
-            "- CONFLICTS_WITH -> interaction",
-            "- CARES_ABOUT -> sentiment",
-            "- FAMILY_OF -> identity",
-            "- OWNS / CARRIES / USES -> status or context depending on the sentence",
-            "When unsure, omit the fact instead of hallucinating.",
+            "你是一个中文文学知识图谱抽取器。从小说段落中提取实体和关系。",
+            "",
+            "【核心规则——人物消歧】",
+            "这部小说中，不同世代的角色可能共享相同的名字。你不能仅凭名字判断是否为同一人物。",
+            "必须根据以下叙事信号判断本段提及的人物是新人还是已知人物：",
+            "",
+            "信号1【年龄/世代】：文中出现明确的年龄描述（如“十四岁”“年迈”“年轻时”），",
+            "  若该年龄与已知实体的世代矛盾，则这是一个新角色。",
+            "信号2【出生/登场】：文中描述某人诞生、首次出现、或从远方归来成为新人物。",
+            "信号3【亲属称谓在描述不同人】：文中说“A是B的大儿子”——A和B是两个不同的人。",
+            "  “父亲”“儿子”“哥哥”等称谓描述的是关系，不是同一个人。",
+            "  绝不要把“大儿子”当作父亲实体的一条别名——这是一个新的独立角色。",
+            "信号4【外貌/体格】：文中描述的具体外貌（「脑袋四方」「头发粗硬」「巨汉」）",
+            "  如果与已知角色的描述矛盾，则是不同的人。",
+            "信号5【角色/行为】：不同角色有不同的职业、行为模式、社会关系。",
+            "  例如“炼金术士”“斗鸡场常客”“远征的士兵”描述的是不同的人。",
+            "",
+            "【canonical_name 命名规范】",
+            "- 优先使用全名（如“何塞·阿尔卡蒂奥·布恩迪亚”而非“何塞·阿尔卡蒂奥”），全名更具区分度。",
+            "- 如果原文只给了名字而未给姓氏，在 resolution_hint 中标注区分信息。",
+            "- 不要使用亲属称谓作为 canonical_name（不要创建名为“父亲”或“大儿子”的实体）。",
+            "- aliases 中只放同一个人在不同语境下的称呼，不要放入指向其他角色的关系描述。",
+            "",
+            "【其余规则】",
+            "1. 重点提取 facts（关系），entities 只提取本段新出现的（最多8个）。",
+            "2. 忽略所有英文注释、脚注、括号里的英文译名。",
+            "3. 返回 JSON：{\"entities\":[...],\"facts\":[...]}，不要用 markdown 代码块。",
+            "4. 无可靠抽取时返回 {\"entities\":[],\"facts\":[]}。不确定则省略。",
+            "5. 当你无法确定某角色是否与已知实体为同一人时，倾向于创建新实体（宁分不合）。",
+            "",
+            "entity_type 必须严格区分:",
+            "- character 人物（有名字或明确身份的人，不包括动物和物品）",
+            "- location  地点（城镇、建筑、房间、河流等）",
+            "- group     团体/组织/家族",
+            "- artifact  物品/器物/动物",
+            "- concept   概念/主题/事件",
+            "",
+            "relation_type 及 state_family:",
+            "- FAMILY_OF/identity      亲属/血缘/婚姻",
+            "- LOCATED_IN/location     位于某地",
+            "- SPOKE_WITH/interaction  对话/交流",
+            "- CONFLICTS_WITH/interaction 冲突/对抗",
+            "- CARES_ABOUT/sentiment   关心/爱慕/牵挂",
+            "- MEMBER_OF/membership    属于某团体",
+            "- ACCOMPANIES/context     同行/陪伴",
+            "- OWNS/status             拥有/使用",
+            "",
+            "directionality: directed (有方向) 或 undirected (双向)",
+            "",
+            "entity JSON 字段: canonical_name(必填), entity_type(必填，无把握选unknown), aliases, resolution_hint, evidence, confidence",
+            "entity_type 没有默认值——每一条都必须根据原文内容主动判断类型",
+            "fact JSON 字段: source, target, relation_type, state_family, directionality, fact, evidence, confidence",
         ]
     )
 
@@ -272,28 +304,30 @@ def _build_user_prompt(
         "chapter_index": chunk.chapter_index,
         "paragraph_id": chunk.paragraph_id,
         "paragraph_index": chunk.paragraph_index,
-        "candidate_characters": chunk.candidate_characters,
-        "metadata": chunk.metadata,
     }
     return "\n".join(
         [
-            "Current episode metadata:",
+            "当前片段元数据：",
             json.dumps(metadata, ensure_ascii=False, indent=2),
             "",
-            "Recent visible context before this episode:",
-            recent_context_block or "- none",
+            "前文上下文（最近3个片段）：",
+            recent_context_block or "- 无",
             "",
-            "Known entities already in the graph:",
-            "\n".join(known_entity_lines) or "- none",
+            "已知实体列表（已在上文中出现）：",
+            "\n".join(known_entity_lines) or "- 无",
             "",
-            "Current episode text:",
+            "当前片段文本（仅提取中文实体和关系，忽略其中的英文注释）：",
             chunk.text,
             "",
-            "Extraction requirements:",
-            "1. Normalize recurring mentions to stable canonical names when supported.",
-            "2. Prefer known entities in the graph when the mention clearly matches one.",
-            "3. Keep aliases short and exact.",
-            "4. Return only JSON.",
+            "抽取要求：",
+            "1. 将同一实体的不同称呼归一化为稳定的 canonical_name（优先使用最完整的全名形式）。",
+            "2. 若提及的人物已存在于已知实体列表，优先使用已有实体名。",
+            "3. aliases 只保留简短、精确的别名（昵称、简称），不要把亲属关系描述当作别名。",
+            "4. resolution_hint 字段必填——用一句话说明你是如何判断该实体与已知实体的关系：",
+            "   - 如果是已有实体：说明为什么确定为同一个人。",
+            "   - 如果是新实体：说明为什么判断为不同的人（年龄、世代、外貌、行为等差异）。",
+            "5. 忽略括号中的英文译名和英文脚注。",
+            "6. 只返回 JSON。",
         ]
     )
 
@@ -410,7 +444,7 @@ def _invoke_with_retries(
                 model_name=runtime.model_name,
                 messages=messages,
                 temperature=0.0,
-                max_tokens=1200,
+                max_tokens=8192,
                 timeout_seconds=timeout_seconds,
                 response_format=response_format,
             )
@@ -434,6 +468,9 @@ def _is_retryable_transport_error(exc: RuntimeError) -> bool:
         "connection aborted",
         "connection refused",
         "remote end closed connection",
+        "eof",
+        "ssl",
+        "unexpected",
     ]
     return any(marker in message for marker in markers)
 

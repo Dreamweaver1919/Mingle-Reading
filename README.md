@@ -1,6 +1,6 @@
-# Muse Reading
+# Mingle Reading
 
-Muse Reading 是一个面向长文本的 AI 阅读工作空间。它将可上传的书籍文本、进度感知检索、内联高亮问答、章节摘要、轻量级角色引导式陪伴阅读以及防剧透控制整合为一个可本地运行的 MVP，并可作为开源项目进行扩展。
+Mingle Reading 是一个面向长文本的 AI 阅读工作空间。它将可上传的书籍文本、进度感知检索、内联高亮问答、章节摘要、轻量级角色引导式陪伴阅读以及防剧透控制整合为一个可本地运行的 MVP，并可作为开源项目进行扩展。
 
 本仓库是该构想的当前工程骨架。其核心原则是：先跑通阅读闭环，再通过更好的数据集、更丰富的时间图、更强的角色一致性以及更完整的评测来深化智能。
 
@@ -26,13 +26,13 @@ Muse Reading 是一个面向长文本的 AI 阅读工作空间。它将可上传
 
 ## 系统架构
 
-Muse Reading 目前包含四个协作层：
+Mingle Reading 目前包含四个协作层：
 
 1. `前端交互层`
-   [frontend](/C:/Users/21358/Desktop/MuseReading/frontend) 中的静态 Web 阅读器处理上传、章节导航、段落选择、摘要触发和提问提交。
+   [frontend](/C:/Users/21358/Desktop/MingleReading/frontend) 中的静态 Web 阅读器处理上传、章节导航、段落选择、摘要触发和提问提交。
 
 2. `应用与编排层`
-   [backend/api/app.py](/C:/Users/21358/Desktop/MuseReading/backend/api/app.py) 中的 FastAPI 应用暴露了上传、书籍、角色、问答、编排、摘要和图谱等端点。
+   [backend/api/app.py](/C:/Users/21358/Desktop/MingleReading/backend/api/app.py) 中的 FastAPI 应用暴露了上传、书籍、角色、问答、编排、摘要和图谱等端点。
 
 3. `知识与检索层`
    后端从上传文本中构建归一化的书籍记录、检索 chunk 和时间上下文图。检索是进度感知的，并设计为在生成回答之前支持防剧透过滤。
@@ -116,7 +116,7 @@ python -m pip install -r requirements.txt
 
 ### 配置角色 Agent
 
-要使用 `lu-xun`、`mark-twain` 或 `zhang-ailing`，请将 [`.env.example`](/C:/Users/21358/Desktop/MuseReading/.env.example) 复制为 `.env`，并为每个 Agent 填入你自己的 OpenAI 兼容端点、模型名称和 API key。应用启动时会自动加载此根目录下的 `.env` 文件。
+要使用 `lu-xun`、`mark-twain` 或 `zhang-ailing`，请将 [`.env.example`](/C:/Users/21358/Desktop/MingleReading/.env.example) 复制为 `.env`，并为每个 Agent 填入你自己的 OpenAI 兼容端点、模型名称和 API key。应用启动时会自动加载此根目录下的 `.env` 文件。
 
 ### 运行 API 和阅读器
 
@@ -126,11 +126,11 @@ uvicorn backend.api.app:app --reload
 
 然后打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)。
 
-启动时，如果 [backend/assets/examples/muse_demo_book.txt](/C:/Users/21358/Desktop/MuseReading/backend/assets/examples/muse_demo_book.txt) 存在，应用会自动加载该内置演示书籍。
+启动时，如果 [backend/assets/examples/mingle_demo_book.txt](/C:/Users/21358/Desktop/MingleReading/backend/assets/examples/mingle_demo_book.txt) 存在，应用会自动加载该内置演示书籍。
 
 ## 前端使用
 
-阅读器 UI 由 FastAPI 直接从 [frontend/index.html](/C:/Users/21358/Desktop/MuseReading/frontend/index.html) 提供服务。
+阅读器 UI 由 FastAPI 直接从 [frontend/index.html](/C:/Users/21358/Desktop/MingleReading/frontend/index.html) 提供服务。
 
 当前 UI 能力：
 
@@ -148,7 +148,7 @@ uvicorn backend.api.app:app --reload
 
 ## API 概览
 
-[backend/api/app.py](/C:/Users/21358/Desktop/MuseReading/backend/api/app.py) 当前暴露的端点：
+[backend/api/app.py](/C:/Users/21358/Desktop/MingleReading/backend/api/app.py) 当前暴露的端点：
 
 - `GET /api/health`
 - `GET /api/books`
@@ -254,8 +254,8 @@ python backend/eval/run_eval.py
 
 ## 相关项目文档
 
-- [架构对齐](/C:/Users/21358/Desktop/MuseReading/backend/docs/architecture_alignment.md)
-- [README 架构摘要](/C:/Users/21358/Desktop/MuseReading/backend/docs/readme_architecture_summary.md)
-- [数据设计](/C:/Users/21358/Desktop/MuseReading/backend/docs/data/muse_reading_data_design.md)
-- [基准测试 README](/C:/Users/21358/Desktop/MuseReading/backend/benchmarks/README.md)
-- [数据骨架 README](/C:/Users/21358/Desktop/MuseReading/backend/assets/data/README.md)
+- [架构对齐](/C:/Users/21358/Desktop/MingleReading/backend/docs/architecture_alignment.md)
+- [README 架构摘要](/C:/Users/21358/Desktop/MingleReading/backend/docs/readme_architecture_summary.md)
+- [数据设计](/C:/Users/21358/Desktop/MingleReading/backend/docs/data/mingle_reading_data_design.md)
+- [基准测试 README](/C:/Users/21358/Desktop/MingleReading/backend/benchmarks/README.md)
+- [数据骨架 README](/C:/Users/21358/Desktop/MingleReading/backend/assets/data/README.md)

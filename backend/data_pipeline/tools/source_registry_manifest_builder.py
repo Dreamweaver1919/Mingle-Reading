@@ -411,7 +411,7 @@ def _write_registry_batch(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Register local txt/json sources into Muse Reading source manifests.",
+        description="Register local txt/json sources into Mingle Reading source manifests.",
     )
     parser.add_argument("inputs", nargs="+", type=Path, help="Input txt/json files or directories.")
     parser.add_argument(

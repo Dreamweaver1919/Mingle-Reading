@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://muse-reading.local/backend/assets/schemas/chunk.schema.json",
-  "title": "Muse Reading Retrieval Chunk",
+  "$id": "https://mingle-reading.local/backend/assets/schemas/chunk.schema.json",
+  "title": "Mingle Reading Retrieval Chunk",
   "type": "object",
   "required": [
     "chunk_id",

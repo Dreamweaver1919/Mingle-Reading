@@ -1,6 +1,6 @@
 ## 上传导入
 
-Muse Reading 现在支持 `.txt`、`.pdf` 和 `.epub` 格式的本地导入，无需使用外部服务。
+Mingle Reading 现在支持 `.txt`、`.pdf` 和 `.epub` 格式的本地导入，无需使用外部服务。
 
 ### 支持格式
 

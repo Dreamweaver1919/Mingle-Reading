@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://muse-reading.local/backend/assets/schemas/raw_text.schema.json",
-  "title": "Muse Reading Raw Text Record",
+  "$id": "https://mingle-reading.local/backend/assets/schemas/raw_text.schema.json",
+  "title": "Mingle Reading Raw Text Record",
   "type": "object",
   "required": [
     "record_id",

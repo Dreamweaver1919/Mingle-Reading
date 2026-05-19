@@ -1,1 +1,1 @@
-"""Data ingestion and local persistence for Muse Reading."""
+"""Data ingestion and local persistence for Mingle Reading."""

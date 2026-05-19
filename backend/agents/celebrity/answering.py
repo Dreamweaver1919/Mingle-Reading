@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from backend.api.schemas import QuestionRequest, QuestionResponse, RetrievedContext
 from backend.knowledge_graph.storage import load_graph
@@ -25,6 +25,58 @@ def _merge_contexts(local_hits: list[RetrievedContext], graph_hits) -> list[Retr
         )
     ranked = sorted(merged.values(), key=lambda item: (item.score, -item.chapter_index, -item.paragraph_index), reverse=True)
     return ranked
+
+
+def _build_graph_knowledge_block(graph, query: str, max_chapter: int, top_k: int = 15) -> str:
+    """Extract structured entity and relation knowledge from the graph."""
+    if graph is None:
+        return ""
+
+    query_lower = query.lower()
+    parts: list[str] = []
+
+    # Find matching entities
+    matched_entities: list[tuple[int, str, str, str]] = []  # (mentions, name, type, span)
+    for entity in graph.entities.values():
+        if entity.first_seen_chapter > max_chapter:
+            continue
+        name = entity.canonical_name
+        aliases = entity.aliases or []
+        all_forms = [name.lower()] + [a.lower() for a in aliases]
+        if any(q in form or form in q for q in query_lower.split() for form in all_forms if len(q) >= 2):
+            span = f"ch{entity.first_seen_chapter}-{entity.last_seen_chapter}"
+            matched_entities.append((entity.mention_count, name, entity.entity_type, span))
+
+    matched_entities.sort(key=lambda x: x[0], reverse=True)
+    matched_entity_names = {name for _, name, _, _ in matched_entities[:top_k]}
+
+    if matched_entities[:10]:
+        parts.append("知识图谱中的相关实体：")
+        for _, name, etype, span in matched_entities[:10]:
+            parts.append(f"  - {name}（{etype}，出场{span}）")
+
+    # Find relations between matched entities
+    relation_parts: list[str] = []
+    for edge in graph.relations.values():
+        if edge.status != "active":
+            continue
+        if edge.valid_at_chapter > max_chapter:
+            continue
+        source = graph.entities.get(edge.source_entity_id)
+        target = graph.entities.get(edge.target_entity_id)
+        if source is None or target is None:
+            continue
+        if source.canonical_name in matched_entity_names or target.canonical_name in matched_entity_names:
+            relation_parts.append(
+                f"  - {source.canonical_name} --[{edge.relation_type}]--> {target.canonical_name}：{edge.fact}（ch{edge.valid_at_chapter}）"
+            )
+    if relation_parts[:15]:
+        parts.append("知识图谱中的相关关系：")
+        parts.extend(relation_parts[:15])
+
+    if parts:
+        parts.insert(0, "【知识图谱结构化数据】")
+    return "\n".join(parts)
 
 
 def build_answer(request: QuestionRequest, chunks) -> QuestionResponse:
@@ -61,6 +113,10 @@ def build_answer(request: QuestionRequest, chunks) -> QuestionResponse:
     )
     contexts = _merge_contexts(local_contexts, orchestration.hits)[: request.top_k]
     visible_context_texts = [context.text for context in contexts]
+
+    graph_knowledge = _build_graph_knowledge_block(graph, request.question, request.current_chapter)
+    if graph_knowledge:
+        visible_context_texts.insert(0, graph_knowledge)
 
     if not safety.safe:
         refusal, model_name, _ = generate_persona_response(

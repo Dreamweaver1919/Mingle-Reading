@@ -20,8 +20,8 @@ BENCHMARKS_DIR = ROOT / "backend" / "benchmarks"
 
 
 def ensure_demo_book():
-    source = EXAMPLES_DIR / "muse_demo_book.txt"
-    return build_book_record("muse_demo_book", source.read_text(encoding="utf-8"), source)
+    source = EXAMPLES_DIR / "mingle_demo_book.txt"
+    return build_book_record("mingle_demo_book", source.read_text(encoding="utf-8"), source)
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:

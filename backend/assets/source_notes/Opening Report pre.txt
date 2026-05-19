@@ -1,5 +1,5 @@
 [slide 1]
-Muse Reading
+Mingle Reading
 Date: May 9, 2026
 Prepared by:
 Jiaxuan
@@ -151,8 +151,8 @@ We transform reading from a passive act into an active state of musing: deep eng
 PHILOSOPHY IN ACTION
 Product Ecosystem:​ All Lead Readers are branded as Muses.
 Immersive Interactions:
-Muse Talk:​ The live conversational sidebar.
-Muse Spark:​ Contextual highlights & insight pop-ups.
+Mingle Talk:​ The live conversational sidebar.
+Mingle Spark:​ Contextual highlights & insight pop-ups.
 Core Slogan:​ "Don't just read. Muse."
 ENGINEERED FOR IMMERSION
 A full-stack system built on a stable, low-latency foundation. Features a distraction-free reader, precise reading lifecycle tracking, and flawless multi-modal AI interaction—so the technology disappears, and the musing​ begins.

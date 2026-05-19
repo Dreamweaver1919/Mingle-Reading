@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://muse-reading.local/backend/assets/schemas/persona.schema.json",
-  "title": "Muse Reading Persona Pack",
+  "$id": "https://mingle-reading.local/backend/assets/schemas/persona.schema.json",
+  "title": "Mingle Reading Persona Pack",
   "type": "object",
   "required": [
     "persona_id",

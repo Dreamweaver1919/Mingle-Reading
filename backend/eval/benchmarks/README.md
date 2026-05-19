@@ -15,7 +15,7 @@
 
 这些测试数据刻意保持小规模和合成化：
 
-- 它们针对内置的 `backend/assets/examples/muse_demo_book.txt`
+- 它们针对内置的 `backend/assets/examples/mingle_demo_book.txt`
 - 用于回归检查，而非模型排名
 - 仅断言直接 `eval` 运行所需的最小行为
 

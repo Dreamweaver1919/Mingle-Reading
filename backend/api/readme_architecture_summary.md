@@ -1,15 +1,15 @@
 # README 架构摘要（可直接复用）
 
-## What Is Muse Reading
+## What Is Mingle Reading
 
-Muse Reading 是一个构建在 `SageRead` 阅读器之上的 AI 沉浸式陪读系统。它将阅读器中的选中、高亮、提问、停留与阅读进度事件送入多 Agent 编排层，再通过带元数据门控的 RAG 检索返回作者视角讲解、角色对话、章节总结与行内 Bubble 注释。
+Mingle Reading 是一个构建在 `SageRead` 阅读器之上的 AI 沉浸式陪读系统。它将阅读器中的选中、高亮、提问、停留与阅读进度事件送入多 Agent 编排层，再通过带元数据门控的 RAG 检索返回作者视角讲解、角色对话、章节总结与行内 Bubble 注释。
 
 ## Core Architecture
 
 - `Frontend Interaction Layer`
   - Web Reader Interface
-  - Chat Sidebar / Muse Talk
-  - Intelligent Bubble / Muse Spark
+  - Chat Sidebar / Mingle Talk
+  - Intelligent Bubble / Mingle Spark
   - Notes & Highlights
   - Reading Progress Tracker
 - `Agent Orchestration Layer`
@@ -69,4 +69,4 @@ Muse Reading 是一个构建在 `SageRead` 阅读器之上的 AI 沉浸式陪读
 - `selection_context`
 - `agent_type / mode`
 
-更完整的接口建议见 [system_interfaces.md](/C:/Users/21358/Desktop/MuseReading/architecture/system_interfaces.md)。
+更完整的接口建议见 [system_interfaces.md](/C:/Users/21358/Desktop/MingleReading/architecture/system_interfaces.md)。
