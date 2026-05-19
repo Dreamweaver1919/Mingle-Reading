@@ -1,7 +1,7 @@
 {
   "book_id": "一只特立独行的猪-王小波",
   "title": "一只特立独行的猪 (王小波)",
-  "source_path": "C:\\Users\\21358\\Desktop\\MuseReading\\backend\\workspace_state\\uploads\\一只特立独行的猪-王小波.epub",
+  "source_path": "C:\\Users\\21358\\Desktop\\MuseReading\\backend\\runtime\\uploads\\一只特立独行的猪-王小波.epub",
   "chapter_count": 45,
   "chunks": [
     {
@@ -11598,14 +11598,11 @@
         "is_merged_packet": false,
         "packet_token_count": 367,
         "llm_gate": {
-          "score": 5,
+          "score": 3,
           "reasons": [
-            "new-entity",
             "relation-trigger"
           ],
-          "new_aliases": [
-            "let"
-          ],
+          "new_aliases": [],
           "source_paragraph_count": 1
         }
       }

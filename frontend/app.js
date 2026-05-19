@@ -151,6 +151,8 @@ const state = {
   },
 };
 
+const LAST_OPENED_BOOK_KEY = "muse-reading:last-opened-book";
+
 async function fetchJSON(url, options = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -228,6 +230,25 @@ function getFirstReadableChapter() {
     }
   }
   return 1;
+}
+
+function getChapterTitle(chapter) {
+  if (!state.activeBookDetail) {
+    return `Chapter ${chapter}`;
+  }
+
+  const chapterTitles = state.activeBookDetail.chapter_titles || {};
+  const rawTitle = chapterTitles[String(chapter)] || chapterTitles[chapter];
+  if (typeof rawTitle === "string" && rawTitle.trim()) {
+    return rawTitle.trim();
+  }
+
+  return `Chapter ${chapter}`;
+}
+
+function getChapterDisplayLabel(chapter) {
+  const title = getChapterTitle(chapter);
+  return title === `Chapter ${chapter}` ? title : `Chapter ${chapter}: ${title}`;
 }
 
 function getCurrentPages() {
@@ -613,9 +634,9 @@ function renderReaderHeader() {
 
   const pages = getCurrentPages();
   document.getElementById("book-title").textContent = state.activeBookDetail.title;
-  document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id} 路 ${state.activeBookDetail.chapter_count} chapters`;
+  document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id} - ${state.activeBookDetail.chapter_count} chapters`;
   document.getElementById("progress-text").textContent = `Current position: chapter ${state.readingProgress.chapter_id}, page ${state.activePageIndex + 1}/${pages.length || 0}, paragraph ${state.readingProgress.paragraph_id || "-"}`;
-  document.getElementById("hero-chapter").textContent = `Chapter ${state.activeChapter}`;
+  document.getElementById("hero-chapter").textContent = getChapterDisplayLabel(state.activeChapter);
   document.getElementById("hero-paragraph").textContent =
     state.activeParagraphIndex === null ? "-" : `P${state.activeParagraphIndex}`;
   document.getElementById("hero-dwell").textContent = `${state.readingProgress.dwell_seconds || 0}s`;
@@ -634,12 +655,12 @@ function renderChapterNav() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `chapter-button ${chapter === state.activeChapter ? "is-active" : ""}`;
-    button.textContent = `Chapter ${chapter}`;
+    button.textContent = getChapterDisplayLabel(chapter);
     button.addEventListener("click", () => setActiveChapter(chapter));
     container.appendChild(button);
   }
 
-  document.getElementById("toc-progress").textContent = `Reading chapter ${state.activeChapter}`;
+  document.getElementById("toc-progress").textContent = `Reading ${getChapterDisplayLabel(state.activeChapter)}`;
 }
 
 function renderChapterSelects() {
@@ -655,7 +676,7 @@ function renderChapterSelects() {
   for (let chapter = 1; chapter <= state.activeBookDetail.chapter_count; chapter += 1) {
     const option = document.createElement("option");
     option.value = String(chapter);
-    option.textContent = `Chapter ${chapter}`;
+    option.textContent = getChapterDisplayLabel(chapter);
     chapterSelect.appendChild(option);
   }
   chapterSelect.value = String(state.activeChapter);
@@ -688,16 +709,16 @@ function renderAssistantStatus() {
   if (state.assistantMode === "persona") {
     const persona = getPersonaById(state.personaId);
     node.textContent = persona
-      ? `Current mode: literary agent 路 ${persona.name}`
+      ? `Current mode: literary agent - ${persona.name}`
       : "Current mode: literary agent";
     return;
   }
   if (state.activeCharacterProfile) {
-    node.textContent = `Current mode: character agent 路 ${state.activeCharacterProfile.character_name}`;
+    node.textContent = `Current mode: character agent - ${state.activeCharacterProfile.character_name}`;
     return;
   }
   if (state.activeCharacterName) {
-    node.textContent = `Current mode: character agent 路 ${state.activeCharacterName}`;
+    node.textContent = `Current mode: character agent - ${state.activeCharacterName}`;
     return;
   }
   node.textContent = "Current mode: character agent. Choose or enter a character name to continue.";
@@ -1267,6 +1288,11 @@ async function loadBooks() {
 
 async function openBook(bookId) {
   state.activeBook = bookId;
+  try {
+    window.localStorage.setItem(LAST_OPENED_BOOK_KEY, bookId);
+  } catch (_error) {
+    // Ignore storage errors and keep the current session alive.
+  }
   state.activeBookDetail = await fetchJSON(`/api/books/${bookId}`);
   state.personaConversation = [];
   state.characterConversation = [];
@@ -1508,8 +1534,20 @@ async function bootstrap() {
   renderGraphPanel();
   await loadPersonas();
   await loadBooks();
-  if (state.books[0]) {
-    await openBook(state.books[0].book_id);
+  let preferredBookId = "";
+  try {
+    preferredBookId = window.localStorage.getItem(LAST_OPENED_BOOK_KEY) || "";
+  } catch (_error) {
+    preferredBookId = "";
+  }
+
+  const resolvedBookId =
+    (preferredBookId && state.books.find((book) => book.book_id === preferredBookId)?.book_id) ||
+    state.books[state.books.length - 1]?.book_id ||
+    state.books[0]?.book_id;
+
+  if (resolvedBookId) {
+    await openBook(resolvedBookId);
   }
 }
 

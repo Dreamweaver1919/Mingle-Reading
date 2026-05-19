@@ -339,7 +339,12 @@ def persona_agent_prompt_preview(persona_id: str, request: PersonaPromptPreviewR
 def book_detail(book_id: str):
     book = get_or_build_book(book_id)
     chapters: dict[int, list[dict[str, str | int]]] = {}
+    chapter_titles: dict[int, str] = {}
     for chunk in book.chunks:
+        metadata = chunk.metadata or {}
+        chapter_title = metadata.get("chapter_title")
+        if isinstance(chapter_title, str) and chapter_title.strip():
+            chapter_titles.setdefault(chunk.chapter_index, chapter_title.strip())
         chapters.setdefault(chunk.chapter_index, []).append(
             {
                 "chunk_id": chunk.chunk_id,
@@ -351,6 +356,7 @@ def book_detail(book_id: str):
         "book_id": book.book_id,
         "title": book.title,
         "chapter_count": book.chapter_count,
+        "chapter_titles": chapter_titles,
         "chapters": chapters,
     }
 
@@ -463,7 +469,9 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
     normalized_scope = scope.lower().strip()
     if normalized_scope not in {"chapter", "book"}:
         raise HTTPException(status_code=400, detail="invalid_graph_scope")
-    max_paragraph = paragraph if paragraph and paragraph > 0 else None
+    full_book_chapter = max((item.chapter_index for item in graph.chapter_timeline), default=chapter)
+    effective_chapter = full_book_chapter if normalized_scope == "book" else chapter
+    max_paragraph = None if normalized_scope == "book" else (paragraph if paragraph and paragraph > 0 else None)
     chapter_key = f"chapter_{chapter:03d}"
     chapter_node = graph.chapters.get(chapter_key)
     timeline_entry = next((item for item in graph.chapter_timeline if item.chapter_index == chapter), None)
@@ -471,18 +479,18 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
         raise HTTPException(status_code=404, detail="chapter_not_found")
 
     def _entity_is_visible(entity) -> bool:
-        if entity.first_seen_chapter > chapter:
+        if entity.first_seen_chapter > effective_chapter:
             return False
         if max_paragraph is None:
             return True
-        return entity.first_seen_chapter < chapter or entity.first_seen_paragraph <= max_paragraph
+        return entity.first_seen_chapter < effective_chapter or entity.first_seen_paragraph <= max_paragraph
 
     if normalized_scope == "book":
         entity_pool = [entity for entity in graph.entities.values() if _entity_is_visible(entity)]
         relation_ids = [
             relation.edge_id
             for relation in graph.relations.values()
-            if relation.is_visible(max_chapter=chapter, max_paragraph=max_paragraph)
+            if relation.is_visible(max_chapter=effective_chapter, max_paragraph=max_paragraph)
         ]
         community_candidates = list(graph.communities.values())
     else:
@@ -505,7 +513,7 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
         relation = graph.relations.get(relation_id)
         if relation is None:
             continue
-        if not relation.is_visible(max_chapter=chapter, max_paragraph=max_paragraph):
+        if not relation.is_visible(max_chapter=effective_chapter, max_paragraph=max_paragraph):
             continue
         relation_pool.append(relation)
         selected_entity_ids.add(relation.source_entity_id)
@@ -580,9 +588,9 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
         "book_id": graph.book_id,
         "title": graph.title,
         "scope": normalized_scope,
-        "chapter_index": chapter if normalized_scope == "chapter" else None,
+        "chapter_index": chapter if normalized_scope == "chapter" else effective_chapter,
         "paragraph_limit": max_paragraph,
-        "chapter_title": (timeline_entry.title if timeline_entry else chapter_node.title) if normalized_scope == "chapter" and (timeline_entry or chapter_node) else "",
+        "chapter_title": (timeline_entry.title if timeline_entry else chapter_node.title) if normalized_scope == "chapter" and (timeline_entry or chapter_node) else "Whole Book",
         "stats": {
             "node_count": len(nodes),
             "edge_count": len(edges),
