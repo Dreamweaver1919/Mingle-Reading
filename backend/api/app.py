@@ -73,17 +73,19 @@ def _upload_stage_percent(stage: str) -> int:
         "extract-source-text": 5,
         "segment-chapters": 12,
         "construct-episodes": 22,
-        "graph-episode-start": 32,
-        "llm-request-dispatched": 42,
-        "llm-response-received": 54,
-        "llm-request-failed": 54,
-        "graph-episode-complete": 64,
-        "graph-community-build": 74,
-        "graph-saga-build": 80,
-        "graph-timeline-build": 86,
-        "graph-build-finished": 90,
-        "persist-book-record": 94,
-        "persist-graph-snapshot": 97,
+        "graph-episode-start": 30,
+        "llm-skipped": 40,
+        "llm-request-dispatched": 46,
+        "llm-response-received": 56,
+        "llm-request-failed": 56,
+        "graph-episode-complete": 66,
+        "chapter-consolidation": 76,
+        "graph-community-build": 84,
+        "graph-saga-build": 88,
+        "graph-timeline-build": 92,
+        "graph-build-finished": 95,
+        "persist-book-record": 97,
+        "persist-graph-snapshot": 99,
         "finalize-upload": 99,
         "completed": 100,
         "failed": 100,
@@ -437,6 +439,143 @@ def graph_metadata(book_id: str):
             "storage": graph.metadata.get("storage", {}),
             "stats": graph.stats().model_dump(),
         }
+
+
+@app.get("/api/books/{book_id}/graph/view")
+def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 18, scope: str = "chapter"):
+    graph = get_or_build_graph(book_id)
+    normalized_scope = scope.lower().strip()
+    if normalized_scope not in {"chapter", "book"}:
+        raise HTTPException(status_code=400, detail="invalid_graph_scope")
+    max_paragraph = paragraph if paragraph and paragraph > 0 else None
+    chapter_key = f"chapter_{chapter:03d}"
+    chapter_node = graph.chapters.get(chapter_key)
+    timeline_entry = next((item for item in graph.chapter_timeline if item.chapter_index == chapter), None)
+    if normalized_scope == "chapter" and chapter_node is None and timeline_entry is None:
+        raise HTTPException(status_code=404, detail="chapter_not_found")
+
+    def _entity_is_visible(entity) -> bool:
+        if entity.first_seen_chapter > chapter:
+            return False
+        if max_paragraph is None:
+            return True
+        return entity.first_seen_chapter < chapter or entity.first_seen_paragraph <= max_paragraph
+
+    if normalized_scope == "book":
+        entity_pool = [entity for entity in graph.entities.values() if _entity_is_visible(entity)]
+        relation_ids = [
+            relation.edge_id
+            for relation in graph.relations.values()
+            if relation.is_visible(max_chapter=chapter, max_paragraph=max_paragraph)
+        ]
+        community_candidates = list(graph.communities.values())
+    else:
+        chapter_entity_ids = list((timeline_entry.entity_ids if timeline_entry else chapter_node.entity_ids) if (timeline_entry or chapter_node) else [])
+        entity_pool = [
+            graph.entities[entity_id]
+            for entity_id in chapter_entity_ids
+            if entity_id in graph.entities and _entity_is_visible(graph.entities[entity_id])
+        ]
+        relation_ids = list((timeline_entry.relation_ids if timeline_entry else chapter_node.relation_ids) if (timeline_entry or chapter_node) else [])
+        community_ids = list((timeline_entry.community_ids if timeline_entry else chapter_node.community_ids) if (timeline_entry or chapter_node) else [])
+        community_candidates = [graph.communities[community_id] for community_id in community_ids if community_id in graph.communities]
+
+    entity_pool.sort(key=lambda item: item.mention_count, reverse=True)
+    selected_entities = entity_pool[: max(6, limit)]
+    selected_entity_ids = {entity.entity_id for entity in selected_entities}
+
+    relation_pool = []
+    for relation_id in relation_ids:
+        relation = graph.relations.get(relation_id)
+        if relation is None:
+            continue
+        if not relation.is_visible(max_chapter=chapter, max_paragraph=max_paragraph):
+            continue
+        relation_pool.append(relation)
+        selected_entity_ids.add(relation.source_entity_id)
+        selected_entity_ids.add(relation.target_entity_id)
+
+    if len(selected_entity_ids) > limit:
+        selected_entity_ids = {
+            entity.entity_id
+            for entity in sorted(
+                [graph.entities[entity_id] for entity_id in selected_entity_ids if entity_id in graph.entities],
+                key=lambda item: item.mention_count,
+                reverse=True,
+            )[:limit]
+        }
+        relation_pool = [
+            relation
+            for relation in relation_pool
+            if relation.source_entity_id in selected_entity_ids and relation.target_entity_id in selected_entity_ids
+        ]
+
+    nodes = []
+    for entity_id in selected_entity_ids:
+        entity = graph.entities.get(entity_id)
+        if entity is None:
+            continue
+        nodes.append(
+            {
+                "id": entity.entity_id,
+                "label": entity.canonical_name,
+                "type": entity.entity_type,
+                "mention_count": entity.mention_count,
+                "first_seen_chapter": entity.first_seen_chapter,
+                "first_seen_paragraph": entity.first_seen_paragraph,
+                "summary": entity.summary,
+            }
+        )
+
+    edges = []
+    for relation in relation_pool:
+        if relation.source_entity_id not in selected_entity_ids or relation.target_entity_id not in selected_entity_ids:
+            continue
+        edges.append(
+            {
+                "id": relation.edge_id,
+                "source": relation.source_entity_id,
+                "target": relation.target_entity_id,
+                "label": relation.relation_type,
+                "fact": relation.fact,
+                "state_family": relation.state_family,
+                "status": relation.status,
+                "weight": relation.weight,
+                "valid_at_chapter": relation.valid_at_chapter,
+                "valid_at_paragraph": relation.valid_at_paragraph,
+            }
+        )
+
+    community_items = []
+    community_candidates.sort(key=lambda item: (len(item.entity_ids), len(item.relation_ids)), reverse=True)
+    for community in community_candidates[:6]:
+        community_items.append(
+            {
+                "community_id": community.community_id,
+                "label": community.label,
+                "summary": community.summary,
+                "entity_count": len(community.entity_ids),
+                "relation_count": len(community.relation_ids),
+            }
+        )
+
+    return {
+        "graph_id": graph.graph_id,
+        "book_id": graph.book_id,
+        "title": graph.title,
+        "scope": normalized_scope,
+        "chapter_index": chapter if normalized_scope == "chapter" else None,
+        "paragraph_limit": max_paragraph,
+        "chapter_title": (timeline_entry.title if timeline_entry else chapter_node.title) if normalized_scope == "chapter" and (timeline_entry or chapter_node) else "",
+        "stats": {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "community_count": len(community_items),
+        },
+        "nodes": sorted(nodes, key=lambda item: item["mention_count"], reverse=True),
+        "edges": sorted(edges, key=lambda item: item["weight"], reverse=True),
+        "communities": community_items,
+    }
 
 
 @app.post("/api/books/{book_id}/graph/query")

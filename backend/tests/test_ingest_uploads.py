@@ -160,3 +160,18 @@ def test_build_book_record_merges_hard_wrapped_paragraph_fragments():
     assert record.chapter_count == 1
     assert len(record.chunks) == 2
     assert "William Somerset Maugham, a celebrated English writer began his long writing career" in record.chunks[0].text
+
+
+def test_build_book_record_uses_constrained_packet_merging_without_crossing_dialogue_boundaries():
+    raw_text = (
+        "Chapter 1\n\n"
+        "Lin enters the room\n\n"
+        "and closes the window.\n\n"
+        "\"Who is there?\" Aya asks.\n\n"
+        "Lin answers in a lower voice."
+    )
+    record = build_book_record("packet-demo", raw_text, Path("packet-demo.txt"))
+    assert record.chapter_count == 1
+    assert len(record.chunks) == 3
+    assert "Lin enters the room and closes the window." in record.chunks[0].text
+    assert "\"Who is there?\" Aya asks." in record.chunks[1].text

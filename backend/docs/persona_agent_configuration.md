@@ -1,31 +1,46 @@
-# 角色 Agent 配置
+# Persona Agent Configuration
 
-Muse Reading 当前提供了完整的文学领读 Agent 运行时路径。三个已命名的 Agent 为：
+Muse Reading 当前的三位名家 agent 已不再依赖旧的 `persona pack / catalog / persona_kb` 目录作为主数据源。
 
-- `lu-xun`
-- `mark-twain`
-- `zhang-ailing`
+当前唯一的名家资料来源是：
 
-此外还有一个 `neutral` 阅读器用于非角色输出。
+- `backend/assets/Celebrity-skill/Celebrity-skill/LuXun-skill-main`
+- `backend/assets/Celebrity-skill/Celebrity-skill/MarkTwain-skill-main`
+- `backend/assets/Celebrity-skill/Celebrity-skill/ZhangAiLing-skill-main`
 
-## 端到端已打通的内容
+每个 skill bundle 都包含：
 
-每个角色 Agent 现在具备直接使用所需的全部四层：
+- `SKILL.md`
+- `README.md`
+- `references/research/01-writings.md`
+- `references/research/02-conversations.md`
+- `references/research/03-expression-dna.md`
+- `references/research/04-external-views.md`
+- `references/research/05-decisions.md`
+- `references/research/06-timeline.md`
 
-1. `Agent 配置`
-   定义在 [backend/llm_memory/persona/persona_service.py](/C:/Users/21358/Desktop/MuseReading/backend/llm_memory/persona/persona_service.py) 中，包含显示名称、环境变量名和 prompt 特征。
-2. `角色 RAG 知识库`
-   从 `backend/assets/data/processed/personas/persona_kb/<persona_id>/` 加载。
-3. `Prompt 组装`
-   系统 prompt、角色证据和阅读器可见书籍上下文在生成前统一组装。
-4. `真实模型调用`
-   [backend/llm_memory/persona/model_client.py](/C:/Users/21358/Desktop/MuseReading/backend/llm_memory/persona/model_client.py) 调用 OpenAI 兼容的 `/v1/chat/completions` 端点。
+## Current Workflow
 
-## 必需环境变量
+当前名家 agent 的回答链是三路合成：
 
-将 [`.env.example`](/C:/Users/21358/Desktop/MuseReading/.env.example) 复制为 `.env` 并填入你自己的本地值。后端在启动时会自动加载此根目录下的 `.env` 文件。
+1. `Book knowledge`
+   - 来自当前书本的正文检索与 temporal knowledge graph 检索
+   - 并且始终受阅读进度约束
+2. `Celebrity-skill RAG`
+   - 从对应名家的 skill bundle 中切出 markdown snippet
+   - 按 query 检索 relevant snippets
+3. `Persona skill prompt`
+   - 由 `SKILL.md` 的角色规则与研究资料共同塑造 system prompt
 
-预期变量：
+最终回答遵守：
+
+- 名家可以有完整的人设资料
+- 但讨论当前书本时，仍然只能依据当前可见正文和图谱证据
+- 不允许剧透未来剧情
+
+## Runtime Configuration
+
+在根目录 `.env` 中为每位 agent 配置：
 
 - `LU_XUN_API_KEY`
 - `LU_XUN_BASE_URL`
@@ -37,32 +52,13 @@ Muse Reading 当前提供了完整的文学领读 Agent 运行时路径。三个
 - `ZHANG_AILING_BASE_URL`
 - `ZHANG_AILING_MODEL_NAME`
 
-可选的 neutral 阅读器变量：
+中性导读可选：
 
 - `MUSE_NEUTRAL_API_KEY`
 - `MUSE_NEUTRAL_BASE_URL`
 - `MUSE_NEUTRAL_MODEL_NAME`
 
-如有任何必需值缺失，API 会返回清晰的配置错误信息，而非虚假的兜底回答。
-
-## 运行时行为
-
-`POST /api/qa`：
-
-1. 系统仅检索截至 `current_chapter` 为止的可见文本。
-2. 以问题、高亮和可见上下文查询角色知识库。
-3. 构建角色专属的 system prompt。
-4. 将角色 prompt 加可见文本证据发送到配置的模型端点。
-5. 返回生成的回答以及 `model_name`。
-
-`POST /api/summary`：
-
-1. 系统收集当前章节的可见 chunk。
-2. 检索支撑角色证据。
-3. 请求配置的角色模型仅对该章节进行摘要。
-4. 返回生成的摘要以及 `model_name`。
-
-## 当前接口列表
+## API Surface
 
 - `GET /api/personas`
 - `GET /api/persona-agents`
@@ -73,8 +69,8 @@ Muse Reading 当前提供了完整的文学领读 Agent 运行时路径。三个
 - `POST /api/qa`
 - `POST /api/summary`
 
-## 注意事项
+其中：
 
-- 角色模型端点必须是 OpenAI 兼容的。
-- 角色风格可以影响解读和语气，但绝不覆盖防剧透边界。
-- 角色知识库存储的是结构化证据和摘要，而非完整的受版权保护语料。
+- `/retrieve` 返回基于 `celebrity-skill` 检索到的 snippets
+- `/prompt-preview` 展示当前 persona 的 system prompt 与 skill hits
+- `/api/qa` 与 `/api/summary` 使用 `book graph + skill RAG + persona prompt` 联合生成

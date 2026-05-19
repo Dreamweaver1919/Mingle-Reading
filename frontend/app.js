@@ -1,69 +1,69 @@
-const CHARS_PER_PAGE = 1150;
+﻿const CHARS_PER_PAGE = 1150;
 const REQUEST_TIMEOUT_MS = 300000;
 const WORKFLOW_TICK_MS = 900;
 
 const PENDING_WORKFLOWS = {
   idle: {
     title: "Idle",
-    description: "等待用户发起上传、问答或总结请求。",
+    description: "绛夊緟鐢ㄦ埛鍙戣捣涓婁紶銆侀棶绛旀垨鎬荤粨璇锋眰銆?,
     steps: [],
   },
   uploadGraph: {
     title: "Graphiti Temporal Graph Build",
-    description: "正在把上传文本转换成 Graphiti 风格的时序知识图谱基座。",
+    description: "姝ｅ湪鎶婁笂浼犳枃鏈浆鎹㈡垚 Graphiti 椋庢牸鐨勬椂搴忕煡璇嗗浘璋卞熀搴с€?,
     steps: [
-      { name: "Extract source text", copy: "读取 TXT / PDF / EPUB，并提取后续建图所需的正文。" },
-      { name: "Segment chapters", copy: "按章节和段落切分文本，建立稳定的阅读边界。" },
-      { name: "Construct episodes", copy: "把段落转换为 canonical episodes，并串起 narrative order。" },
-      { name: "Resolve entities", copy: "结合已有图节点和上下文，做 LLM-assisted entity resolution。" },
-      { name: "Resolve facts", copy: "抽取人物、地点、关系和状态事实，并做 temporal invalidation。" },
-      { name: "Build communities", copy: "汇总 chapter timeline、community 和 saga 结构。" },
-      { name: "Build sagas", copy: "把跨章节的叙事主线整理成 saga 级结构。" },
-      { name: "Assemble chapter timeline", copy: "把 episode、entity 和 relation 汇总成章节时间线。" },
-      { name: "Serialize graph payload", copy: "把内存中的图节点、边和元数据序列化为可落盘格式。" },
-      { name: "Persist book record", copy: "先写入 book record，固定章节、段落和阅读视图数据。" },
-      { name: "Persist graph snapshot", copy: "写入 temporal graph 快照、relations、communities 和 sagas。" },
-      { name: "Finalize graph metadata", copy: "收尾图统计、storage metadata 和前端可读索引。" },
+      { name: "Extract source text", copy: "璇诲彇 TXT / PDF / EPUB锛屽苟鎻愬彇鍚庣画寤哄浘鎵€闇€鐨勬鏂囥€? },
+      { name: "Segment chapters", copy: "鎸夌珷鑺傚拰娈佃惤鍒囧垎鏂囨湰锛屽缓绔嬬ǔ瀹氱殑闃呰杈圭晫銆? },
+      { name: "Construct episodes", copy: "鎶婃钀借浆鎹负 canonical episodes锛屽苟涓茶捣 narrative order銆? },
+      { name: "Resolve entities", copy: "缁撳悎宸叉湁鍥捐妭鐐瑰拰涓婁笅鏂囷紝鍋?LLM-assisted entity resolution銆? },
+      { name: "Resolve facts", copy: "鎶藉彇浜虹墿銆佸湴鐐广€佸叧绯诲拰鐘舵€佷簨瀹烇紝骞跺仛 temporal invalidation銆? },
+      { name: "Build communities", copy: "姹囨€?chapter timeline銆乧ommunity 鍜?saga 缁撴瀯銆? },
+      { name: "Build sagas", copy: "鎶婅法绔犺妭鐨勫彊浜嬩富绾挎暣鐞嗘垚 saga 绾х粨鏋勩€? },
+      { name: "Assemble chapter timeline", copy: "鎶?episode銆乪ntity 鍜?relation 姹囨€绘垚绔犺妭鏃堕棿绾裤€? },
+      { name: "Serialize graph payload", copy: "鎶婂唴瀛樹腑鐨勫浘鑺傜偣銆佽竟鍜屽厓鏁版嵁搴忓垪鍖栦负鍙惤鐩樻牸寮忋€? },
+      { name: "Persist book record", copy: "鍏堝啓鍏?book record锛屽浐瀹氱珷鑺傘€佹钀藉拰闃呰瑙嗗浘鏁版嵁銆? },
+      { name: "Persist graph snapshot", copy: "鍐欏叆 temporal graph 蹇収銆乺elations銆乧ommunities 鍜?sagas銆? },
+      { name: "Finalize graph metadata", copy: "鏀跺熬鍥剧粺璁°€乻torage metadata 鍜屽墠绔彲璇荤储寮曘€? },
     ],
   },
   personaQa: {
     title: "Persona Answering",
-    description: "正在组合书本上下文、名家 persona RAG 和防剧透约束。",
+    description: "姝ｅ湪缁勫悎涔︽湰涓婁笅鏂囥€佸悕瀹?persona RAG 鍜岄槻鍓ч€忕害鏉熴€?,
     steps: [
-      { name: "Read current scope", copy: "定位当前章节、高亮和可见上下文。" },
-      { name: "Retrieve graph context", copy: "从 temporal graph 检索当前问题相关的已读事实。" },
-      { name: "Retrieve persona context", copy: "召回名家资料片段和风格证据。" },
-      { name: "Apply spoiler guard", copy: "根据当前进度过滤未来信息，只保留可见范围。" },
-      { name: "Generate answer", copy: "组织成完整名家回答并写回对话区。" },
+      { name: "Read current scope", copy: "瀹氫綅褰撳墠绔犺妭銆侀珮浜拰鍙涓婁笅鏂囥€? },
+      { name: "Retrieve graph context", copy: "浠?temporal graph 妫€绱㈠綋鍓嶉棶棰樼浉鍏崇殑宸茶浜嬪疄銆? },
+      { name: "Retrieve persona context", copy: "鍙洖鍚嶅璧勬枡鐗囨鍜岄鏍艰瘉鎹€? },
+      { name: "Apply spoiler guard", copy: "鏍规嵁褰撳墠杩涘害杩囨护鏈潵淇℃伅锛屽彧淇濈暀鍙鑼冨洿銆? },
+      { name: "Generate answer", copy: "缁勭粐鎴愬畬鏁村悕瀹跺洖绛斿苟鍐欏洖瀵硅瘽鍖恒€? },
     ],
   },
   characterQa: {
     title: "Character Companion Answering",
-    description: "正在让书中角色在当前已读边界内进行陪读回应。",
+    description: "姝ｅ湪璁╀功涓鑹插湪褰撳墠宸茶杈圭晫鍐呰繘琛岄櫔璇诲洖搴斻€?,
     steps: [
-      { name: "Read visible scope", copy: "定位当前章节和用户高亮对应的可见文本。" },
-      { name: "Resolve character memory", copy: "检索角色在当前进度前已经出现的事件和关系。" },
-      { name: "Apply spoiler guard", copy: "过滤角色未来命运和后文未揭示信息。" },
-      { name: "Generate answer", copy: "以角色身份输出连续陪读回答。" },
+      { name: "Read visible scope", copy: "瀹氫綅褰撳墠绔犺妭鍜岀敤鎴烽珮浜搴旂殑鍙鏂囨湰銆? },
+      { name: "Resolve character memory", copy: "妫€绱㈣鑹插湪褰撳墠杩涘害鍓嶅凡缁忓嚭鐜扮殑浜嬩欢鍜屽叧绯汇€? },
+      { name: "Apply spoiler guard", copy: "杩囨护瑙掕壊鏈潵鍛借繍鍜屽悗鏂囨湭鎻ず淇℃伅銆? },
+      { name: "Generate answer", copy: "浠ヨ鑹茶韩浠借緭鍑鸿繛缁櫔璇诲洖绛斻€? },
     ],
   },
   chapterSummary: {
     title: "Chapter Summary",
-    description: "正在根据当前已读内容生成阶段性总结。",
+    description: "姝ｅ湪鏍规嵁褰撳墠宸茶鍐呭鐢熸垚闃舵鎬ф€荤粨銆?,
     steps: [
-      { name: "Collect chapter episodes", copy: "收集当前章节已读段落和相邻证据。" },
-      { name: "Read graph state", copy: "整理人物、关系和主题在本章的局部演化。" },
-      { name: "Apply spoiler guard", copy: "阻断未来章节信息，只总结当前可见范围。" },
-      { name: "Generate summary", copy: "输出阶段总结并写入对话记录。" },
+      { name: "Collect chapter episodes", copy: "鏀堕泦褰撳墠绔犺妭宸茶娈佃惤鍜岀浉閭昏瘉鎹€? },
+      { name: "Read graph state", copy: "鏁寸悊浜虹墿銆佸叧绯诲拰涓婚鍦ㄦ湰绔犵殑灞€閮ㄦ紨鍖栥€? },
+      { name: "Apply spoiler guard", copy: "闃绘柇鏈潵绔犺妭淇℃伅锛屽彧鎬荤粨褰撳墠鍙鑼冨洿銆? },
+      { name: "Generate summary", copy: "杈撳嚭闃舵鎬荤粨骞跺啓鍏ュ璇濊褰曘€? },
     ],
   },
   characterProfile: {
     title: "Character Profile Build",
-    description: "正在根据当前已读文本生成角色画像。",
+    description: "姝ｅ湪鏍规嵁褰撳墠宸茶鏂囨湰鐢熸垚瑙掕壊鐢诲儚銆?,
     steps: [
-      { name: "Find character evidence", copy: "在当前已读范围内定位角色出现的证据段落。" },
-      { name: "Assemble relation view", copy: "汇总该角色可见的人物关系和张力。" },
-      { name: "Generate profile", copy: "生成用于前端可视化的角色卡片。" },
+      { name: "Find character evidence", copy: "鍦ㄥ綋鍓嶅凡璇昏寖鍥村唴瀹氫綅瑙掕壊鍑虹幇鐨勮瘉鎹钀姐€? },
+      { name: "Assemble relation view", copy: "姹囨€昏瑙掕壊鍙鐨勪汉鐗╁叧绯诲拰寮犲姏銆? },
+      { name: "Generate profile", copy: "鐢熸垚鐢ㄤ簬鍓嶇鍙鍖栫殑瑙掕壊鍗＄墖銆? },
     ],
   },
 };
@@ -88,6 +88,12 @@ const state = {
   sessionId: `sess_${Date.now()}`,
   requestCounter: 0,
   pendingWorkflow: null,
+  graphViewVisible: false,
+  graphViewScope: "chapter",
+  graphViewData: null,
+  graphViewLoading: false,
+  graphViewError: "",
+  graphSelection: null,
   chapterEnteredAt: Date.now(),
   readingProgress: {
     book_id: "",
@@ -123,7 +129,7 @@ async function fetchJSON(url, options = {}) {
     response = await fetch(url, { ...options, signal: options.signal || controller.signal });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error(`请求等待超过 ${REQUEST_TIMEOUT_MS / 1000}s。`);
+      throw new Error(`璇锋眰绛夊緟瓒呰繃 ${REQUEST_TIMEOUT_MS / 1000}s銆俙);
     }
     throw error;
   } finally {
@@ -166,23 +172,23 @@ function renderPendingWorkflow() {
   const workflow = state.pendingWorkflow;
   if (!workflow) {
     pendingLabel.textContent = "idle";
-    pendingTitle.textContent = PENDING_WORKFLOWS.idle.title;
-    pendingDescription.textContent = PENDING_WORKFLOWS.idle.description;
+    pendingTitle.textContent = "Idle";
+    pendingDescription.textContent = "上传文档后，这里会显示文本抽取、文段构建、LLM 抽取和知识图谱写入的实时进度。";
     pendingBar.style.width = "0%";
     pendingPercent.textContent = "0%";
-    pendingStepCaption.textContent = "当前没有运行中的流程。";
+    pendingStepCaption.textContent = "等待新的处理任务开始。";
     indicator.classList.remove("is-active", "is-indeterminate");
     return;
   }
 
   indicator.classList.add("is-active");
   indicator.classList.toggle("is-indeterminate", workflow.indeterminate === true);
-  pendingLabel.textContent = workflow.label;
-  pendingTitle.textContent = workflow.title;
-  pendingDescription.textContent = workflow.description;
-  pendingBar.style.width = workflow.indeterminate ? "32%" : `${workflow.percent}%`;
-  pendingPercent.textContent = `${workflow.percent}%`;
-  pendingStepCaption.textContent = workflow.currentStep?.copy || "正在等待下一步状态。";
+  pendingLabel.textContent = workflow.label || "running";
+  pendingTitle.textContent = workflow.title || "Processing";
+  pendingDescription.textContent = workflow.description || "系统正在处理当前任务。";
+  pendingBar.style.width = workflow.indeterminate ? "32%" : `${workflow.percent || 0}%`;
+  pendingPercent.textContent = `${workflow.percent || 0}%`;
+  pendingStepCaption.textContent = (workflow.currentStep && workflow.currentStep.copy) || "正在等待下一条状态更新。";
 }
 
 function setPendingState(active, label = "idle") {
@@ -192,13 +198,14 @@ function setPendingState(active, label = "idle") {
     renderPendingWorkflow();
     return;
   }
+
   state.pendingWorkflow = {
     label,
     title: "Processing",
-    description: "正在处理请求。",
+    description: "系统正在启动当前任务。",
     steps: [],
     currentIndex: -1,
-    currentStep: null,
+    currentStep: { name: "starting", copy: "正在连接处理管线，请稍候。" },
     percent: 12,
     indeterminate: true,
   };
@@ -214,11 +221,11 @@ function startPendingWorkflow(workflowKey, label = "running") {
   state.pendingWorkflow = {
     key: workflowKey,
     label,
-    title: template.title,
-    description: template.description,
+    title: template.title || "Processing",
+    description: template.description || "系统正在处理当前任务。",
     steps,
     currentIndex: 0,
-    currentStep: steps[0] || null,
+    currentStep: steps[0] || { name: "running", copy: "正在处理中。" },
     percent: steps.length ? basePercent : 18,
     indeterminate: false,
   };
@@ -244,19 +251,19 @@ function startPendingWorkflow(workflowKey, label = "running") {
   }, WORKFLOW_TICK_MS);
 }
 
-function finishPendingWorkflow(label = "done", title = "Completed", description = "流程已经完成。") {
+function finishPendingWorkflow(label = "done", title = "Completed", description = "任务已完成。") {
   clearPendingWorkflowTimer();
   if (!state.pendingWorkflow) {
     return;
   }
-  const lastIndex = Math.max(0, state.pendingWorkflow.steps.length - 1);
+  const lastIndex = Math.max(0, (state.pendingWorkflow.steps || []).length - 1);
   state.pendingWorkflow = {
     ...state.pendingWorkflow,
     label,
     title,
     description,
     currentIndex: lastIndex,
-    currentStep: state.pendingWorkflow.steps[lastIndex] || null,
+    currentStep: (state.pendingWorkflow.steps || [])[lastIndex] || state.pendingWorkflow.currentStep,
     percent: 100,
     indeterminate: false,
   };
@@ -270,24 +277,182 @@ function releasePendingState(delayMs = 900) {
   }, delayMs);
 }
 
-function applyUploadJobState(job) {
-  const processed = job.processed_snippets || 0;
-  const total = job.total_snippets || 0;
-  const snippetProgress = total ? `已处理文段 ${processed}/${total}` : "正在准备文段统计";
+const UPLOAD_STAGE_META = {
+  queued: {
+    title: "Upload queued",
+    description: "绛夊緟鍚庣寮€濮嬪鐞嗕笂浼犳枃浠躲€?,
+  },
+  "extract-source-text": {
+    title: "Extracting source text",
+    description: "姝ｅ湪璇诲彇 TXT / PDF / EPUB 骞舵娊鍙栨鏂囥€?,
+  },
+  "segment-chapters": {
+    title: "Segmenting chapters",
+    description: "姝ｅ湪璇嗗埆绔犺妭杈圭晫骞舵暣鐞嗘钀姐€?,
+  },
+  "construct-episodes": {
+    title: "Building constrained packets",
+    description: "姝ｅ湪鎸夌珷鑺傚唴閭绘帴瑙勫垯鍚堝苟娈佃惤锛岀敓鎴愮敤浜庣煡璇嗗浘璋辨娊鍙栫殑 episodes銆?,
+  },
+  "graph-episode-start": {
+    title: "Processing episode",
+    description: "姝ｅ湪澶勭悊褰撳墠鏂囨锛屽噯澶囪繘鍏ュ疄浣撲笌浜嬪疄鎶藉彇銆?,
+  },
+  "llm-skipped": {
+    title: "LLM gate skipped this episode",
+    description: "褰撳墠鏂囨淇″彿杈冨急锛屽凡閫氳繃楂樼簿搴﹂棬鎺ц烦杩囧ぇ妯″瀷璋冪敤銆?,
+  },
+  "llm-request-dispatched": {
+    title: "Waiting for LLM extraction",
+    description: "宸茬粡鍚戞ā鍨嬫彁浜?entity / fact extraction prompt锛屾鍦ㄧ瓑寰呯粨鏋勫寲 JSON 杩斿洖銆?,
+  },
+  "llm-response-received": {
+    title: "LLM extraction received",
+    description: "宸叉敹鍒扮粨鏋勫寲瀹炰綋涓庝簨瀹炲€欓€夛紝姝ｅ湪鍐欏洖褰撳墠鏂囨鍥捐氨銆?,
+  },
+  "llm-request-failed": {
+    title: "LLM extraction failed",
+    description: "褰撳墠鏂囨鐨勫ぇ妯″瀷鎶藉彇澶辫触锛岃妫€鏌ヤ笂娓告ā鍨嬫湇鍔℃垨 JSON 杈撳嚭銆?,
+  },
+  "graph-episode-complete": {
+    title: "Episode graph updated",
+    description: "褰撳墠鏂囨鐨勫疄浣撱€佸叧绯诲拰鏃跺簭鐘舵€佸凡缁忓啓鍏ュ浘璋卞唴瀛樸€?,
+  },
+  "chapter-consolidation": {
+    title: "Chapter consolidation",
+    description: "姝ｅ湪鍋氱珷鑺傜骇鍒悕褰掑苟銆佸叧绯诲幓閲嶄笌鐘舵€佸啿绐佹秷瑙ｃ€?,
+  },
+  "graph-community-build": {
+    title: "Building communities",
+    description: "姝ｅ湪浠庣珷鑺備笌瀹炰綋鍏崇郴涓敓鎴?community 鑱氬悎灞傘€?,
+  },
+  "graph-saga-build": {
+    title: "Building sagas",
+    description: "姝ｅ湪鐢熸垚璺ㄧ珷鑺傜殑 saga 鍙欎簨鑱氬悎灞傘€?,
+  },
+  "graph-timeline-build": {
+    title: "Building chapter timeline",
+    description: "姝ｅ湪瑁呴厤 chapter timeline 涓?active / invalidated facts 瑙嗗浘銆?,
+  },
+  "graph-build-finished": {
+    title: "Graph build finished",
+    description: "鍥捐氨鍐呭瓨鏋勫缓瀹屾垚锛屽噯澶囧啓鍏ユ寔涔呭寲瀛樺偍銆?,
+  },
+  "persist-book-record": {
+    title: "Persisting book record",
+    description: "姝ｅ湪淇濆瓨瑙ｆ瀽鍚庣殑涔︾睄缁撴瀯涓?episode 璁板綍銆?,
+  },
+  "persist-graph-snapshot": {
+    title: "Persisting graph snapshot",
+    description: "姝ｅ湪淇濆瓨 temporal graph snapshot銆乺elations銆乧ommunities 涓?sagas銆?,
+  },
+  "finalize-upload": {
+    title: "Finalizing upload",
+    description: "姝ｅ湪鍐欏叆鏈€缁堝厓鏁版嵁骞剁粨鏉熸湰娆℃瀯鍥句换鍔°€?,
+  },
+  completed: {
+    title: "Temporal graph ready",
+    description: "涓婁紶銆佸垏鍒嗕笌鐭ヨ瘑鍥捐氨鏋勫缓宸插畬鎴愩€?,
+  },
+  failed: {
+    title: "Upload failed",
+    description: "涓婁紶浠诲姟澶辫触锛岃鏌ョ湅褰撳墠闃舵鍜岄敊璇鎯呫€?,
+  },
+};
+
+function formatSourceParagraphSummary(details = {}) {
+  const sourceCount = Number(details.source_paragraph_count || 0);
+  const sourceIndices = Array.isArray(details.source_paragraph_indices) ? details.source_paragraph_indices : [];
+  const packetTokens = Number(details.packet_token_count || 0);
+  if (!sourceCount && !packetTokens) {
+    return "";
+  }
+  const rangeLabel =
+    sourceIndices.length > 1
+      ? `${sourceIndices[0]}-${sourceIndices[sourceIndices.length - 1]}`
+      : sourceIndices.length === 1
+      ? String(sourceIndices[0])
+      : "-";
+  const mergedLabel = details.is_merged_packet ? "merged packet" : "single paragraph";
+  const tokenLabel = packetTokens ? `, ${packetTokens} chars` : "";
+  return `婧愭枃娈?${rangeLabel}锛?{sourceCount || 1} 娈碉紝${mergedLabel}${tokenLabel}锛塦;
+}
+
+function formatGateSummary(details = {}) {
+  if (!details || typeof details !== "object") {
+    return "";
+  }
+  const reasons = Array.isArray(details.reasons) ? details.reasons.filter(Boolean) : [];
+  const score = typeof details.score === "number" ? details.score : null;
+  const threshold = typeof details.threshold === "number" ? details.threshold : null;
+  if (score === null && !reasons.length) {
+    return "";
+  }
+  const scoreLabel = score !== null && threshold !== null ? `gate ${score}/${threshold}` : "gate";
+  const reasonLabel = reasons.length ? `锛?{reasons.join(", ")}` : "";
+  return `${scoreLabel}${reasonLabel}`;
+}
+
+function formatUploadStageCopy(job) {
+  const processed = Number(job.processed_snippets || 0);
+  const total = Number(job.total_snippets || 0);
+  const details = job.details || {};
   const currentSnippet = job.current_snippet_id
-    ? `当前文段 ${job.current_snippet_id}（chapter ${job.current_chapter_index || "-"} / paragraph ${job.current_paragraph_index || "-"}）`
-    : "当前还没有锁定到具体文段";
-  state.pendingWorkflow = {
-    key: "uploadGraph",
-    label: job.status,
+    ? `褰撳墠鏂囨 ${job.current_snippet_id}锛坈hapter ${job.current_chapter_index || "-"} / paragraph ${job.current_paragraph_index || "-"}锛塦
+    : "";
+  const processedLabel = total ? `宸插鐞嗘枃娈?${processed}/${total}` : "";
+  const packetSummary = formatSourceParagraphSummary(details);
+  const gateSummary = formatGateSummary(details);
+  const llmDispatch =
+    job.stage === "llm-request-dispatched"
+      ? `LLM provider: ${details.provider || "configured runtime"}锛宲rompt 宸蹭氦浠橈紝绛夊緟杩斿洖`
+      : "";
+  const llmResponse =
+    job.stage === "llm-response-received"
+      ? `LLM 杩斿洖 ${details.entity_candidates || 0} 涓疄浣撳€欓€夛紝${details.fact_candidates || 0} 鏉′簨瀹炲€欓€塦
+      : "";
+  const llmFailure = job.stage === "llm-request-failed" && details.error ? `閿欒锛?{details.error}` : "";
+  const consolidation =
+    job.stage === "chapter-consolidation"
+      ? `绔犺妭鏁?${details.chapter_count || "-"}锛屽綋鍓嶅浘涓疄浣?${details.active_entity_count || 0}锛屽叧绯?${details.active_relation_count || 0}`
+      : "";
+  const persistence =
+    job.stage === "persist-graph-snapshot"
+      ? `瀹炰綋 ${details.entity_count || 0}锛屽叧绯?${details.relation_count || 0}锛宑ommunity ${details.community_count || 0}锛宻aga ${details.saga_count || 0}`
+      : "";
+
+  return [
+    processedLabel,
+    currentSnippet,
+    packetSummary,
+    gateSummary,
+    llmDispatch,
+    llmResponse,
+    llmFailure,
+    consolidation,
+    persistence,
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+function applyUploadJobState(job) {
+  const stage = job.stage || job.status || "queued";
+  const stageMeta = UPLOAD_STAGE_META[stage] || {
     title: job.title || "Temporal graph build",
     description: job.message || "",
+  };
+  state.pendingWorkflow = {
+    key: "uploadGraph",
+    label: stage,
+    title: job.title || stageMeta.title,
+    description: job.message || stageMeta.description,
     percent: job.percent || 0,
     indeterminate: false,
     currentIndex: 0,
     currentStep: {
-      name: job.stage || "running",
-      copy: `${snippetProgress}。${currentSnippet}。`,
+      name: stage,
+      copy: formatUploadStageCopy(job),
     },
     steps: [],
   };
@@ -329,7 +494,7 @@ function getPersonaById(personaId) {
   return state.personas.find((persona) => persona.persona_id === personaId) || state.personas[0] || null;
 }
 
-function previewText(text, fallback = "还没有选中的文本") {
+function previewText(text, fallback = "杩樻病鏈夐€変腑鐨勬枃鏈?) {
   return text && text.trim() ? text.trim() : fallback;
 }
 
@@ -465,13 +630,13 @@ function renderCharacterCandidates() {
   select.innerHTML = "";
   const emptyOption = document.createElement("option");
   emptyOption.value = "";
-  emptyOption.textContent = state.characterCandidates.length ? "请选择角色候选" : "暂无角色候选";
+  emptyOption.textContent = state.characterCandidates.length ? "璇烽€夋嫨瑙掕壊鍊欓€? : "鏆傛棤瑙掕壊鍊欓€?;
   select.appendChild(emptyOption);
 
   state.characterCandidates.forEach((candidate) => {
     const option = document.createElement("option");
     option.value = candidate.character_name;
-    option.textContent = `${candidate.character_name} · ${candidate.mention_count} 次`;
+    option.textContent = `${candidate.character_name} 路 ${candidate.mention_count} 娆;
     select.appendChild(option);
   });
 
@@ -484,7 +649,7 @@ function renderCharacterProfile() {
   const container = document.getElementById("character-profile-card");
   container.innerHTML = "";
   if (!state.activeCharacterProfile) {
-    container.innerHTML = '<p class="muted">生成角色画像后，这里会展示当前已读范围内的角色摘要、张力和关系。</p>';
+    container.innerHTML = '<p class="muted">鐢熸垚瑙掕壊鐢诲儚鍚庯紝杩欓噷浼氬睍绀哄綋鍓嶅凡璇昏寖鍥村唴鐨勮鑹叉憳瑕併€佸紶鍔涘拰鍏崇郴銆?/p>';
     return;
   }
 
@@ -502,25 +667,25 @@ function renderCharacterProfile() {
   relationList.className = "plain-list relationship-list";
   (profile.relationships || []).forEach((relation) => {
     const li = document.createElement("li");
-    li.textContent = `${relation.target}：${relation.description}`;
+    li.textContent = `${relation.target}锛?{relation.description}`;
     relationList.appendChild(li);
   });
 
   container.innerHTML = `
     <h4 class="character-name">${profile.character_name}</h4>
     <p class="muted">${profile.summary}</p>
-    <p class="label">核心张力</p>
-    <p class="signature-tension">${profile.signature_tension || "当前已读范围内还没有足够的角色冲突描述。"}</p>
-    <p class="label">当前可见范围</p>
+    <p class="label">鏍稿績寮犲姏</p>
+    <p class="signature-tension">${profile.signature_tension || "褰撳墠宸茶鑼冨洿鍐呰繕娌℃湁瓒冲鐨勮鑹插啿绐佹弿杩般€?}</p>
+    <p class="label">褰撳墠鍙鑼冨洿</p>
     <p class="muted">${profile.current_scope}</p>
-    <p class="label">模型</p>
+    <p class="label">妯″瀷</p>
     <p class="muted">${profile.model_name}</p>
   `;
   container.appendChild(traitRow);
   if (relationList.children.length) {
     const heading = document.createElement("p");
     heading.className = "label";
-    heading.textContent = "人物关系";
+    heading.textContent = "浜虹墿鍏崇郴";
     container.appendChild(heading);
     container.appendChild(relationList);
   }
@@ -529,7 +694,7 @@ function renderCharacterProfile() {
 function renderBooks() {
   const list = document.getElementById("book-list");
   list.innerHTML = "";
-  document.getElementById("book-count").textContent = `${state.books.length} 本`;
+  document.getElementById("book-count").textContent = `${state.books.length} 鏈琡;
   state.books.forEach((book) => {
     const item = document.createElement("li");
     item.className = "book-item";
@@ -548,9 +713,9 @@ function renderBooks() {
 
 function renderReaderHeader() {
   if (!state.activeBookDetail) {
-    document.getElementById("book-title").textContent = "选择一本书开始阅读";
-    document.getElementById("book-subtitle").textContent = "上传文本后，系统会切分章节、建立阅读进度并自动构建 temporal knowledge graph。";
-    document.getElementById("progress-text").textContent = "当前还没有激活的阅读进度。";
+    document.getElementById("book-title").textContent = "閫夋嫨涓€鏈功寮€濮嬮槄璇?;
+    document.getElementById("book-subtitle").textContent = "涓婁紶鏂囨湰鍚庯紝绯荤粺浼氬垏鍒嗙珷鑺傘€佸缓绔嬮槄璇昏繘搴﹀苟鑷姩鏋勫缓 temporal knowledge graph銆?;
+    document.getElementById("progress-text").textContent = "褰撳墠杩樻病鏈夋縺娲荤殑闃呰杩涘害銆?;
     document.getElementById("hero-chapter").textContent = "-";
     document.getElementById("hero-paragraph").textContent = "-";
     document.getElementById("hero-dwell").textContent = "0s";
@@ -558,10 +723,10 @@ function renderReaderHeader() {
   }
   const pages = getCurrentPages();
   document.getElementById("book-title").textContent = state.activeBookDetail.title;
-  document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id}，共 ${state.activeBookDetail.chapter_count} 章。`;
+  document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id}锛屽叡 ${state.activeBookDetail.chapter_count} 绔犮€俙;
   document.getElementById("progress-text").textContent =
-    `当前位于第 ${state.readingProgress.chapter_id} 章 / 第 ${state.activePageIndex + 1} 页 / 段落 ${state.readingProgress.paragraph_id || "-"}，本章共 ${pages.length || 0} 页。`;
-  document.getElementById("hero-chapter").textContent = `第 ${state.activeChapter} 章`;
+    `褰撳墠浣嶄簬绗?${state.readingProgress.chapter_id} 绔?/ 绗?${state.activePageIndex + 1} 椤?/ 娈佃惤 ${state.readingProgress.paragraph_id || "-"}锛屾湰绔犲叡 ${pages.length || 0} 椤点€俙;
+  document.getElementById("hero-chapter").textContent = `绗?${state.activeChapter} 绔燻;
   document.getElementById("hero-paragraph").textContent = state.activeParagraphIndex === null ? "-" : `P${state.activeParagraphIndex}`;
   document.getElementById("hero-dwell").textContent = `${state.readingProgress.dwell_seconds || 0}s`;
 }
@@ -570,18 +735,18 @@ function renderChapterNav() {
   const container = document.getElementById("chapter-nav");
   container.innerHTML = "";
   if (!state.activeBookDetail) {
-    container.innerHTML = '<p class="muted">上传或选择一本书后，这里会显示章节目录。</p>';
+    container.innerHTML = '<p class="muted">涓婁紶鎴栭€夋嫨涓€鏈功鍚庯紝杩欓噷浼氭樉绀虹珷鑺傜洰褰曘€?/p>';
     return;
   }
   for (let chapter = 1; chapter <= state.activeBookDetail.chapter_count; chapter += 1) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `chapter-button ${chapter === state.activeChapter ? "is-active" : ""}`;
-    button.textContent = `第 ${chapter} 章`;
+    button.textContent = `绗?${chapter} 绔燻;
     button.addEventListener("click", () => setActiveChapter(chapter));
     container.appendChild(button);
   }
-  document.getElementById("toc-progress").textContent = `已读至第 ${state.activeChapter} 章`;
+  document.getElementById("toc-progress").textContent = `宸茶鑷崇 ${state.activeChapter} 绔燻;
 }
 
 function renderChapterSelects() {
@@ -595,7 +760,7 @@ function renderChapterSelects() {
   for (let chapter = 1; chapter <= state.activeBookDetail.chapter_count; chapter += 1) {
     const option = document.createElement("option");
     option.value = String(chapter);
-    option.textContent = `第 ${chapter} 章`;
+    option.textContent = `绗?${chapter} 绔燻;
     chapterSelect.appendChild(option);
   }
   chapterSelect.value = String(state.activeChapter);
@@ -604,7 +769,7 @@ function renderChapterSelects() {
     const option = document.createElement("option");
     const paragraphIndex = passage.paragraph_index ?? index + 1;
     option.value = String(paragraphIndex);
-    option.textContent = `段落 ${paragraphIndex}`;
+    option.textContent = `娈佃惤 ${paragraphIndex}`;
     paragraphSelect.appendChild(option);
   });
   if (state.activeParagraphIndex !== null) {
@@ -615,7 +780,7 @@ function renderChapterSelects() {
 function renderSelectionPreview() {
   document.getElementById("highlight-preview").textContent = previewText(
     state.selectionContext.selected_text,
-    "点击正文中的任意段落，这里会显示当前选中的文本。"
+    "鐐瑰嚮姝ｆ枃涓殑浠绘剰娈佃惤锛岃繖閲屼細鏄剧ず褰撳墠閫変腑鐨勬枃鏈€?
   );
 }
 
@@ -623,13 +788,13 @@ function renderAssistantStatus() {
   const node = document.getElementById("assistant-status");
   if (state.assistantMode === "persona") {
     const persona = getPersonaById(state.personaId);
-    node.textContent = persona ? `当前由 ${persona.name} 负责名家导读。` : "当前由名家导读模式回答。";
+    node.textContent = persona ? `褰撳墠鐢?${persona.name} 璐熻矗鍚嶅瀵艰銆俙 : "褰撳墠鐢卞悕瀹跺璇绘ā寮忓洖绛斻€?;
   } else if (state.activeCharacterProfile) {
-    node.textContent = `当前由角色 ${state.activeCharacterProfile.character_name} 负责陪读。`;
+    node.textContent = `褰撳墠鐢辫鑹?${state.activeCharacterProfile.character_name} 璐熻矗闄銆俙;
   } else if (state.activeCharacterName) {
-    node.textContent = `当前准备生成角色 ${state.activeCharacterName} 的陪读画像。`;
+    node.textContent = `褰撳墠鍑嗗鐢熸垚瑙掕壊 ${state.activeCharacterName} 鐨勯櫔璇荤敾鍍忋€俙;
   } else {
-    node.textContent = "先选择或生成一个角色画像，再切到角色陪读模式。";
+    node.textContent = "鍏堥€夋嫨鎴栫敓鎴愪竴涓鑹茬敾鍍忥紝鍐嶅垏鍒拌鑹查櫔璇绘ā寮忋€?;
   }
 }
 
@@ -645,7 +810,7 @@ function renderChatHistory() {
   historyNode.innerHTML = "";
   const conversation = currentConversation();
   if (!conversation.length) {
-    historyNode.innerHTML = '<p class="muted">这里会连续显示名家导读或角色陪读的对话记录。</p>';
+    historyNode.innerHTML = '<p class="muted">杩欓噷浼氳繛缁樉绀哄悕瀹跺璇绘垨瑙掕壊闄鐨勫璇濊褰曘€?/p>';
     return;
   }
   conversation.forEach((turn) => {
@@ -682,6 +847,218 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;")
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function graphNodeColor(type) {
+  if (type === "character") return "#1f6a73";
+  if (type === "theme" || type === "concept") return "#8f5a3c";
+  if (type === "location") return "#546c44";
+  return "#7b6d59";
+}
+
+function renderGraphPanel() {
+  const panel = document.getElementById("graph-panel");
+  const canvas = document.getElementById("graph-canvas");
+  const detail = document.getElementById("graph-detail");
+  const badge = document.getElementById("graph-stats-badge");
+  const caption = document.getElementById("graph-caption");
+  const toggleButton = document.getElementById("graph-toggle-btn");
+  const chapterScopeButton = document.getElementById("graph-scope-chapter-btn");
+  const bookScopeButton = document.getElementById("graph-scope-book-btn");
+  if (!panel || !canvas || !detail || !badge || !caption || !toggleButton || !chapterScopeButton || !bookScopeButton) {
+    return;
+  }
+
+  chapterScopeButton.classList.toggle("is-active", state.graphViewScope === "chapter");
+  bookScopeButton.classList.toggle("is-active", state.graphViewScope === "book");
+
+  panel.classList.toggle("is-hidden", !state.graphViewVisible);
+  toggleButton.textContent = state.graphViewVisible ? "闅愯棌鐭ヨ瘑鍥捐氨" : "鏄剧ず鐭ヨ瘑鍥捐氨";
+
+  if (!state.graphViewVisible) {
+    return;
+  }
+
+  if (state.graphViewLoading) {
+    badge.textContent = "loading";
+    canvas.innerHTML = '<p class="muted">姝ｅ湪璇诲彇褰撳墠绔犺妭鐨勭煡璇嗗浘璋?..</p>';
+    detail.textContent = "鍥捐氨鍔犺浇瀹屾垚鍚庯紝杩欓噷浼氭樉绀鸿妭鐐规垨杈圭殑鎽樿銆?;
+    return;
+  }
+
+  if (state.graphViewError) {
+    badge.textContent = "error";
+    canvas.innerHTML = `<p class="muted">鐭ヨ瘑鍥捐氨璇诲彇澶辫触锛?{escapeHtml(state.graphViewError)}</p>`;
+    detail.textContent = "璇风◢鍚庨噸璇曪紝鎴栧厛纭褰撳墠涔﹀凡缁忔垚鍔熷畬鎴愮煡璇嗗浘璋辨瀯寤恒€?;
+    return;
+  }
+
+  const data = state.graphViewData;
+  const scopeLabel = state.graphViewScope === "book" ? "全书总图" : "当前章节图";
+  if (!data || !Array.isArray(data.nodes) || !data.nodes.length) {
+    badge.textContent = "0 nodes";
+    canvas.innerHTML = `<p class="muted">${scopeLabel}当前还没有足够清晰的图谱节点可显示。</p>`;
+    detail.textContent = state.graphViewScope === "book"
+      ? "这本书已经完成建图，但在当前可见进度内还没有稳定到足以展示的节点和关系。"
+      : "当前章节图为空时，可以直接切到全书总图，避免被单章的稀疏图谱误导。";
+    return;
+  }
+
+  badge.textContent = `${data.stats.node_count} nodes / ${data.stats.edge_count} edges`;
+  caption.textContent = state.graphViewScope === "book"
+    ? `当前显示全书总图，展示截至当前阅读进度可见的全书节点与关系，共有 ${data.stats.node_count} 个节点和 ${data.stats.edge_count} 条边。`
+    : `当前显示第 ${data.chapter_index} 章的局部知识图谱，共有 ${data.stats.node_count} 个节点和 ${data.stats.edge_count} 条边。`;
+
+  const width = 760;
+  const height = 420;
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = Math.max(120, Math.min(170, 42 + data.nodes.length * 10));
+  const positions = {};
+  data.nodes.forEach((node, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(1, data.nodes.length);
+    positions[node.id] = {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * Math.min(radius, 130),
+    };
+  });
+
+  const edgeMarkup = data.edges
+    .map((edge) => {
+      const source = positions[edge.source];
+      const target = positions[edge.target];
+      if (!source || !target) {
+        return "";
+      }
+      const midX = (source.x + target.x) / 2;
+      const midY = (source.y + target.y) / 2;
+      return `
+        <g class="graph-edge-group" data-edge-id="${edge.id}">
+          <line
+            class="graph-edge ${edge.status !== "active" ? "is-invalidated" : ""}"
+            x1="${source.x}"
+            y1="${source.y}"
+            x2="${target.x}"
+            y2="${target.y}"
+            data-edge-id="${edge.id}"
+          ></line>
+          <text class="graph-edge-label" x="${midX}" y="${midY - 6}">${escapeHtml(edge.label)}</text>
+        </g>
+      `;
+    })
+    .join("");
+
+  const nodeMarkup = data.nodes
+    .map((node) => {
+      const position = positions[node.id];
+      const size = Math.max(18, Math.min(34, 14 + Math.round((node.mention_count || 0) / 2)));
+      return `
+        <g class="graph-node" data-node-id="${node.id}">
+          <circle
+            class="graph-node-circle type-${escapeHtml(node.type || "unknown")}"
+            cx="${position.x}"
+            cy="${position.y}"
+            r="${size}"
+            data-node-id="${node.id}"
+          ></circle>
+          <text class="graph-node-label" x="${position.x}" y="${position.y + size + 14}">${escapeHtml(node.label)}</text>
+        </g>
+      `;
+    })
+    .join("");
+
+  const communityMarkup = Array.isArray(data.communities) && data.communities.length
+    ? `<div class="graph-community-summary"><strong>Communities:</strong> ${data.communities
+        .map((item) => `${escapeHtml(item.label)} (${item.entity_count})`)
+        .join(" / ")}</div>`
+    : "";
+
+  canvas.innerHTML = `
+    <svg class="graph-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="knowledge graph view">
+      ${edgeMarkup}
+      ${nodeMarkup}
+    </svg>
+    ${communityMarkup}
+  `;
+
+  detail.textContent = "鐐瑰嚮鑺傜偣鏌ョ湅浜虹墿/姒傚康鎽樿锛岀偣鍑昏竟鏌ョ湅鍏崇郴浜嬪疄銆?;
+
+  canvas.querySelectorAll("[data-node-id]").forEach((nodeElement) => {
+    nodeElement.addEventListener("click", (event) => {
+      const nodeId = event.currentTarget.dataset.nodeId;
+      const node = data.nodes.find((item) => item.id === nodeId);
+      if (!node) {
+        return;
+      }
+      state.graphSelection = { kind: "node", id: nodeId };
+      detail.innerHTML = `
+        <strong>${escapeHtml(node.label)}</strong> 路 ${escapeHtml(node.type || "entity")}<br />
+        鎻愬強娆℃暟锛?{node.mention_count || 0}<br />
+        棣栨鍑虹幇锛氱 ${node.first_seen_chapter || "-"} 绔?/ 娈佃惤 ${node.first_seen_paragraph || "-"}<br />
+        ${escapeHtml(node.summary || "褰撳墠杩樻病鏈変负杩欎釜鑺傜偣鐢熸垚鎽樿銆?)}
+      `;
+    });
+  });
+
+  canvas.querySelectorAll("[data-edge-id]").forEach((edgeElement) => {
+    edgeElement.addEventListener("click", (event) => {
+      const edgeId = event.currentTarget.dataset.edgeId;
+      const edge = data.edges.find((item) => item.id === edgeId);
+      if (!edge) {
+        return;
+      }
+      state.graphSelection = { kind: "edge", id: edgeId };
+      detail.innerHTML = `
+        <strong>${escapeHtml(edge.label)}</strong> 路 ${escapeHtml(edge.state_family || "relation")}<br />
+        鐢熸晥浣嶇疆锛氱 ${edge.valid_at_chapter || "-"} 绔?/ 娈佃惤 ${edge.valid_at_paragraph || "-"}<br />
+        鐘舵€侊細${escapeHtml(edge.status || "unknown")}<br />
+        ${escapeHtml(edge.fact || "褰撳墠娌℃湁鍙樉绀虹殑鍏崇郴璇存槑銆?)}
+      `;
+    });
+  });
+}
+
+async function refreshKnowledgeGraph() {
+  if (!state.activeBook || !state.graphViewVisible) {
+    return;
+  }
+  state.graphViewLoading = true;
+  state.graphViewError = "";
+  renderGraphPanel();
+  try {
+    const query = new URLSearchParams({
+      chapter: String(state.activeChapter),
+      paragraph: String(state.activeParagraphIndex || 0),
+      limit: "18",
+      scope: state.graphViewScope,
+    });
+    state.graphViewData = await fetchJSON(`/api/books/${state.activeBook}/graph/view?${query.toString()}`);
+  } catch (error) {
+    state.graphViewError = error.message;
+  } finally {
+    state.graphViewLoading = false;
+    renderGraphPanel();
+  }
+}
+
+async function toggleKnowledgeGraph() {
+  state.graphViewVisible = !state.graphViewVisible;
+  if (!state.graphViewVisible) {
+    renderGraphPanel();
+    return;
+  }
+  await refreshKnowledgeGraph();
+}
+
+async function setKnowledgeGraphScope(scope) {
+  if (scope !== "chapter" && scope !== "book") {
+    return;
+  }
+  state.graphViewScope = scope;
+  renderGraphPanel();
+  if (state.graphViewVisible) {
+    await refreshKnowledgeGraph();
+  }
 }
 
 function createInlineBubbleMarkup(text, chunkId) {
@@ -747,7 +1124,7 @@ function renderPassages() {
   updatePageIndicator();
 
   if (!pageItems.length) {
-    container.innerHTML = '<p class="muted">当前章节还没有可显示的内容。</p>';
+    container.innerHTML = '<p class="muted">褰撳墠绔犺妭杩樻病鏈夊彲鏄剧ず鐨勫唴瀹广€?/p>';
     return;
   }
 
@@ -755,8 +1132,8 @@ function renderPassages() {
   page.className = "reading-page";
   page.innerHTML = `
     <header class="reading-page-header">
-      <span>第 ${state.activeChapter} 章</span>
-      <span>第 ${state.activePageIndex + 1} 页</span>
+      <span>绗?${state.activeChapter} 绔?/span>
+      <span>绗?${state.activePageIndex + 1} 椤?/span>
     </header>
   `;
 
@@ -785,6 +1162,9 @@ function selectPassage(passage, index, passages) {
   renderSelectionPreview();
   renderReaderHeader();
   renderPassages();
+  if (state.graphViewVisible) {
+    refreshKnowledgeGraph().catch((error) => console.error(error));
+  }
 }
 
 function setPage(pageIndex) {
@@ -851,7 +1231,7 @@ async function loadCharacterCandidates() {
     renderCharacterCandidates();
     return;
   }
-  setButtonLoading("character-generate-btn", true, "正在读取角色候选...");
+  setButtonLoading("character-generate-btn", true, "姝ｅ湪璇诲彇瑙掕壊鍊欓€?..");
   try {
     state.characterCandidates = await fetchJSON(
       `/api/books/${state.activeBook}/characters?current_chapter=${state.activeChapter}&limit=12`
@@ -860,7 +1240,7 @@ async function loadCharacterCandidates() {
   } catch (error) {
     state.characterCandidates = [];
     renderCharacterCandidates();
-    document.getElementById("character-profile-card").innerHTML = `<p class="muted">角色候选读取失败：${error.message}</p>`;
+    document.getElementById("character-profile-card").innerHTML = `<p class="muted">瑙掕壊鍊欓€夎鍙栧け璐ワ細${error.message}</p>`;
   } finally {
     setButtonLoading("character-generate-btn", false);
   }
@@ -875,12 +1255,12 @@ async function generateCharacterProfile() {
   const characterName = typedName || selectedName;
   if (!characterName) {
     document.getElementById("character-profile-card").innerHTML =
-      '<p class="muted">请先选择一个角色，或手动输入角色名后再生成画像。</p>';
+      '<p class="muted">璇峰厛閫夋嫨涓€涓鑹诧紝鎴栨墜鍔ㄨ緭鍏ヨ鑹插悕鍚庡啀鐢熸垚鐢诲儚銆?/p>';
     return;
   }
   state.activeCharacterName = characterName;
   renderAssistantStatus();
-  setButtonLoading("character-generate-btn", true, "正在生成角色画像...");
+  setButtonLoading("character-generate-btn", true, "姝ｅ湪鐢熸垚瑙掕壊鐢诲儚...");
   startPendingWorkflow("characterProfile", "building-profile");
   try {
     const profile = await fetchJSON(`/api/books/${state.activeBook}/characters/profile`, {
@@ -899,9 +1279,9 @@ async function generateCharacterProfile() {
     if (state.assistantMode === "character") {
       await fetchInlineBubbles();
     }
-    finishPendingWorkflow("done", "Character Profile Ready", "角色画像已经生成，可以直接继续角色陪读。");
+    finishPendingWorkflow("done", "Character Profile Ready", "瑙掕壊鐢诲儚宸茬粡鐢熸垚锛屽彲浠ョ洿鎺ョ户缁鑹查櫔璇汇€?);
   } catch (error) {
-    document.getElementById("character-profile-card").innerHTML = `<p class="muted">角色画像生成失败：${error.message}</p>`;
+    document.getElementById("character-profile-card").innerHTML = `<p class="muted">瑙掕壊鐢诲儚鐢熸垚澶辫触锛?{error.message}</p>`;
     setPendingState(false, "idle");
   } finally {
     if (state.pendingWorkflow) {
@@ -939,6 +1319,9 @@ async function setActiveChapter(chapter) {
   renderCharacterProfile();
   await loadCharacterCandidates();
   await fetchInlineBubbles();
+  if (state.graphViewVisible) {
+    await refreshKnowledgeGraph();
+  }
 }
 
 async function loadPersonas() {
@@ -977,8 +1360,12 @@ async function openBook(bookId) {
   state.characterConversation = [];
   state.activeCharacterName = "";
   state.activeCharacterProfile = null;
+  state.graphViewData = null;
+  state.graphViewError = "";
+  state.graphSelection = null;
   renderBooks();
   renderChatHistory();
+  renderGraphPanel();
   await setActiveChapter(getFirstReadableChapter());
 }
 
@@ -1001,10 +1388,10 @@ async function uploadBook(event) {
     finishPendingWorkflow(
       "done",
       "Temporal Graph Ready",
-      `《${uploaded.book_title || uploaded.title}》已经完成章节切分、episode 构建与 temporal graph 写入。`
+      `銆?{uploaded.book_title || uploaded.title}銆嬪凡缁忓畬鎴愮珷鑺傚垏鍒嗐€乪pisode 鏋勫缓涓?temporal graph 鍐欏叆銆俙
     );
   } catch (error) {
-    pushConversation("assistant", `导入失败：${error.message}`);
+    pushConversation("assistant", `瀵煎叆澶辫触锛?{error.message}`);
     renderChatHistory();
     setPendingState(false, "idle");
   } finally {
@@ -1031,7 +1418,7 @@ async function askAssistant() {
   pushConversation("user", question);
   renderChatHistory();
   renderComposerQuestion("");
-  setButtonLoading("ask-btn", true, "正在思考...");
+  setButtonLoading("ask-btn", true, "姝ｅ湪鎬濊€?..");
   startPendingWorkflow(
     state.assistantMode === "persona" ? "personaQa" : "characterQa",
     state.assistantMode === "persona" ? "persona-answering" : "character-answering"
@@ -1055,7 +1442,7 @@ async function askAssistant() {
       answer = response.answer;
     } else {
       if (!state.activeCharacterName) {
-        throw new Error("请先生成或选择一个角色画像，再发起角色陪读问答。");
+        throw new Error("璇峰厛鐢熸垚鎴栭€夋嫨涓€涓鑹茬敾鍍忥紝鍐嶅彂璧疯鑹查櫔璇婚棶绛斻€?);
       }
       const response = await fetchJSON(`/api/books/${state.activeBook}/characters/chat`, {
         method: "POST",
@@ -1078,11 +1465,11 @@ async function askAssistant() {
       "done",
       state.assistantMode === "persona" ? "Persona Answer Ready" : "Character Answer Ready",
       state.assistantMode === "persona"
-        ? "名家 agent 已完成图谱检索、persona RAG 与防剧透过滤后的回答。"
-        : "角色陪读 agent 已完成当前可见范围内的角色化回答。"
+        ? "鍚嶅 agent 宸插畬鎴愬浘璋辨绱€乸ersona RAG 涓庨槻鍓ч€忚繃婊ゅ悗鐨勫洖绛斻€?
+        : "瑙掕壊闄 agent 宸插畬鎴愬綋鍓嶅彲瑙佽寖鍥村唴鐨勮鑹插寲鍥炵瓟銆?
     );
   } catch (error) {
-    pushConversation("assistant", `问答失败：${error.message}`);
+    pushConversation("assistant", `闂瓟澶辫触锛?{error.message}`);
     renderChatHistory();
     setPendingState(false, "idle");
   } finally {
@@ -1097,7 +1484,7 @@ async function summarizeChapter() {
   if (!state.activeBook) {
     return;
   }
-  setButtonLoading("summary-btn", true, "正在生成总结...");
+  setButtonLoading("summary-btn", true, "姝ｅ湪鐢熸垚鎬荤粨...");
   startPendingWorkflow("chapterSummary", "chapter-summary");
   try {
     const response = await fetchJSON("/api/summary", {
@@ -1113,9 +1500,9 @@ async function summarizeChapter() {
     renderAssistantMode();
     pushConversation("assistant", response.summary);
     renderChatHistory();
-    finishPendingWorkflow("done", "Chapter Summary Ready", "当前章节总结已经基于已读 episode 与时序图状态生成完成。");
+    finishPendingWorkflow("done", "Chapter Summary Ready", "褰撳墠绔犺妭鎬荤粨宸茬粡鍩轰簬宸茶 episode 涓庢椂搴忓浘鐘舵€佺敓鎴愬畬鎴愩€?);
   } catch (error) {
-    pushConversation("assistant", `章节总结失败：${error.message}`);
+    pushConversation("assistant", `绔犺妭鎬荤粨澶辫触锛?{error.message}`);
     renderChatHistory();
     setPendingState(false, "idle");
   } finally {
@@ -1145,6 +1532,18 @@ function wireEvents() {
   document.getElementById("upload-form").addEventListener("submit", uploadBook);
   document.getElementById("ask-btn").addEventListener("click", askAssistant);
   document.getElementById("summary-btn").addEventListener("click", summarizeChapter);
+  document.getElementById("graph-toggle-btn").addEventListener("click", () => {
+    toggleKnowledgeGraph().catch((error) => console.error(error));
+  });
+  document.getElementById("graph-refresh-btn").addEventListener("click", () => {
+    refreshKnowledgeGraph().catch((error) => console.error(error));
+  });
+  document.getElementById("graph-scope-chapter-btn").addEventListener("click", () => {
+    setKnowledgeGraphScope("chapter").catch((error) => console.error(error));
+  });
+  document.getElementById("graph-scope-book-btn").addEventListener("click", () => {
+    setKnowledgeGraphScope("book").catch((error) => console.error(error));
+  });
   document.getElementById("clear-chat-btn").addEventListener("click", clearConversation);
   document.getElementById("persona-mode-btn").addEventListener("click", () => setAssistantMode("persona"));
   document.getElementById("character-mode-btn").addEventListener("click", () => setAssistantMode("character"));
@@ -1190,6 +1589,7 @@ async function bootstrap() {
   renderSelectionPreview();
   renderCharacterProfile();
   renderAssistantMode();
+  renderGraphPanel();
   await loadPersonas();
   await loadBooks();
   if (state.books[0]) {

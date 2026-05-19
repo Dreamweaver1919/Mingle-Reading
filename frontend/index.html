@@ -1,10 +1,10 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Muse Reading</title>
-    <link rel="stylesheet" href="/static/main.css?v=20260518-graphiti-progress" />
+    <link rel="stylesheet" href="/static/main.css?v=20260518-progress-v2" />
   </head>
   <body>
     <div class="app-frame">
@@ -28,13 +28,13 @@
           </div>
           <span id="pending-label" class="pending-label">idle</span>
         </div>
-        <p id="pending-description" class="pending-description">等待用户发起上传、问答或总结请求。</p>
+        <p id="pending-description" class="pending-description">上传文档后，这里会显示文本抽取、文段构建、LLM 抽取和知识图谱写入的实时进度。</p>
         <div class="pending-track">
           <div id="pending-bar" class="pending-bar"></div>
         </div>
         <div class="pending-meta">
           <strong id="pending-percent" class="pending-percent">0%</strong>
-          <span id="pending-step-caption" class="pending-step-caption">当前没有运行中的流程。</span>
+          <span id="pending-step-caption" class="pending-step-caption">等待新的处理任务开始。</span>
         </div>
       </section>
 
@@ -42,25 +42,25 @@
         <aside class="column column-left">
           <section class="panel panel-hero">
             <p class="eyebrow">Reader Setup</p>
-            <h2 class="panel-title">沉浸式阅读器</h2>
-            <p class="muted">上传文本后自动切片、建图，并进入阅读、角色陪读与名家导读对话。</p>
+            <h2 class="panel-title">娌夋蹈寮忛槄璇诲櫒</h2>
+            <p class="muted">涓婁紶鏂囨湰鍚庤嚜鍔ㄥ垏鐗囥€佸缓鍥撅紝骞惰繘鍏ラ槄璇汇€佽鑹查櫔璇讳笌鍚嶅瀵艰瀵硅瘽銆?/p>
           </section>
 
           <section class="panel">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Import</p>
-                <h3>上传入口</h3>
+                <h3>涓婁紶鍏ュ彛</h3>
               </div>
               <span class="badge">TXT / PDF / EPUB</span>
             </div>
             <form id="upload-form" class="stack">
               <label class="upload-box" for="file-input">
-                <strong>导入阅读文本</strong>
-                <span class="muted">支持 `.txt`、`.pdf`、`.epub`。扫描 PDF 因缺少文本层，当前暂不支持。</span>
+                <strong>瀵煎叆闃呰鏂囨湰</strong>
+                <span class="muted">鏀寔 `.txt`銆乣.pdf`銆乣.epub`銆傛壂鎻?PDF 鍥犵己灏戞枃鏈眰锛屽綋鍓嶆殏涓嶆敮鎸併€?/span>
               </label>
               <input id="file-input" type="file" accept=".txt,.pdf,.epub,application/pdf,application/epub+zip" />
-              <button class="primary-button" type="submit">上传并开始阅读</button>
+              <button class="primary-button" type="submit">涓婁紶骞跺紑濮嬮槄璇?/button>
             </form>
           </section>
 
@@ -68,14 +68,14 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Literary Agent</p>
-                <h3>名家导读</h3>
+                <h3>鍚嶅瀵艰</h3>
               </div>
               <span id="persona-type-badge" class="badge badge-warm">literary_master</span>
             </div>
             <div class="stack">
-              <select id="persona-select" aria-label="选择名家导读"></select>
+              <select id="persona-select" aria-label="閫夋嫨鍚嶅瀵艰"></select>
               <div class="persona-meta">
-                <p id="persona-name" class="persona-name">导读 agent</p>
+                <p id="persona-name" class="persona-name">瀵艰 agent</p>
                 <p id="persona-citation" class="muted"></p>
                 <div class="pill-row" id="persona-traits"></div>
               </div>
@@ -86,18 +86,18 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Character Agent</p>
-                <h3>角色陪读</h3>
+                <h3>瑙掕壊闄</h3>
               </div>
               <span class="badge badge-cool">book_character</span>
             </div>
             <div class="stack">
-              <label class="label" for="character-select">角色候选</label>
-              <select id="character-select" aria-label="选择角色"></select>
-              <label class="label" for="character-input">或手动输入角色名</label>
-              <input id="character-input" class="text-input" type="text" placeholder="输入角色名后生成角色画像" />
-              <button id="character-generate-btn" class="secondary-button" type="button">生成角色画像</button>
+              <label class="label" for="character-select">瑙掕壊鍊欓€?/label>
+              <select id="character-select" aria-label="閫夋嫨瑙掕壊"></select>
+              <label class="label" for="character-input">鎴栨墜鍔ㄨ緭鍏ヨ鑹插悕</label>
+              <input id="character-input" class="text-input" type="text" placeholder="杈撳叆瑙掕壊鍚嶅悗鐢熸垚瑙掕壊鐢诲儚" />
+              <button id="character-generate-btn" class="secondary-button" type="button">鐢熸垚瑙掕壊鐢诲儚</button>
               <div id="character-profile-card" class="character-profile-card">
-                <p class="muted">打开书籍后会根据已读内容生成角色候选，并可进一步生成角色画像。</p>
+                <p class="muted">鎵撳紑涔︾睄鍚庝細鏍规嵁宸茶鍐呭鐢熸垚瑙掕壊鍊欓€夛紝骞跺彲杩涗竴姝ョ敓鎴愯鑹茬敾鍍忋€?/p>
               </div>
             </div>
           </section>
@@ -106,9 +106,9 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Shelf</p>
-                <h3>书架列表</h3>
+                <h3>涔︽灦鍒楄〃</h3>
               </div>
-              <span id="book-count" class="badge">0 本</span>
+              <span id="book-count" class="badge">0 鏈?/span>
             </div>
             <ul id="book-list" class="book-list"></ul>
           </section>
@@ -118,20 +118,20 @@
           <section class="panel panel-reader-hero">
             <div class="reader-summary">
               <p class="eyebrow">Reader Workspace</p>
-              <h2 id="book-title">请选择一本书开始阅读</h2>
-              <p id="book-subtitle" class="muted">页面会跟踪章节、段落与翻页位置，并同步构造 reading_progress。</p>
+              <h2 id="book-title">璇烽€夋嫨涓€鏈功寮€濮嬮槄璇?/h2>
+              <p id="book-subtitle" class="muted">椤甸潰浼氳窡韪珷鑺傘€佹钀戒笌缈婚〉浣嶇疆锛屽苟鍚屾鏋勯€?reading_progress銆?/p>
             </div>
             <div class="stats-grid">
               <article class="stat-card">
-                <span class="label">当前章节</span>
+                <span class="label">褰撳墠绔犺妭</span>
                 <strong id="hero-chapter">-</strong>
               </article>
               <article class="stat-card">
-                <span class="label">段落定位</span>
+                <span class="label">娈佃惤瀹氫綅</span>
                 <strong id="hero-paragraph">-</strong>
               </article>
               <article class="stat-card">
-                <span class="label">停留时长</span>
+                <span class="label">鍋滅暀鏃堕暱</span>
                 <strong id="hero-dwell">0s</strong>
               </article>
             </div>
@@ -140,19 +140,20 @@
           <section class="panel toolbar-panel">
             <div class="toolbar-grid">
               <div class="field-block">
-                <label class="label" for="chapter-select">章节导航</label>
-                <select id="chapter-select" aria-label="选择章节"></select>
+                <label class="label" for="chapter-select">绔犺妭瀵艰埅</label>
+                <select id="chapter-select" aria-label="閫夋嫨绔犺妭"></select>
               </div>
               <div class="field-block">
-                <label class="label" for="paragraph-jump">段落定位</label>
-                <select id="paragraph-jump" aria-label="选择段落"></select>
+                <label class="label" for="paragraph-jump">娈佃惤瀹氫綅</label>
+                <select id="paragraph-jump" aria-label="閫夋嫨娈佃惤"></select>
               </div>
               <div class="field-block field-wide">
-                <span class="label">阅读状态</span>
-                <p id="progress-text" class="muted">尚未加载书籍。</p>
+                <span class="label">闃呰鐘舵€?/span>
+                <p id="progress-text" class="muted">灏氭湭鍔犺浇涔︾睄銆?/p>
               </div>
               <div class="field-actions">
-                <button id="summary-btn" class="secondary-button" type="button">章节总结</button>
+                <button id="summary-btn" class="secondary-button" type="button">绔犺妭鎬荤粨</button>
+                <button id="graph-toggle-btn" class="secondary-button" type="button">鏄剧ず鐭ヨ瘑鍥捐氨</button>
               </div>
             </div>
           </section>
@@ -162,9 +163,9 @@
               <div class="panel-heading">
                 <div>
                   <p class="eyebrow">Outline</p>
-                  <h3>章节目录</h3>
+                  <h3>绔犺妭鐩綍</h3>
                 </div>
-                <span id="toc-progress" class="badge">未开始</span>
+                <span id="toc-progress" class="badge">鏈紑濮?/span>
               </div>
               <div id="chapter-nav" class="chapter-nav"></div>
             </section>
@@ -173,20 +174,44 @@
               <div class="panel-heading">
                 <div>
                   <p class="eyebrow">Reader</p>
-                  <h3>正文阅读</h3>
+                  <h3>姝ｆ枃闃呰</h3>
                 </div>
                 <span class="badge badge-cool">In-text Bubbles</span>
               </div>
               <div class="page-toolbar">
-                <button id="prev-page-btn" class="secondary-button page-nav-button" type="button">上一页</button>
+                <button id="prev-page-btn" class="secondary-button page-nav-button" type="button">涓婁竴椤?/button>
                 <div class="page-status">
                   <span class="label">Page</span>
                   <strong id="page-indicator">- / -</strong>
                 </div>
-                <button id="next-page-btn" class="secondary-button page-nav-button" type="button">下一页</button>
+                <button id="next-page-btn" class="secondary-button page-nav-button" type="button">涓嬩竴椤?/button>
               </div>
               <div id="passage-list" class="page-viewer"></div>
             </section>
+          </section>
+
+          <section id="graph-panel" class="panel graph-panel is-hidden">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">Knowledge Graph</p>
+                <h3>褰撳墠绔犺妭鍥捐氨瑙嗗浘</h3>
+              </div>
+              <span id="graph-stats-badge" class="badge badge-cool">0 nodes</span>
+            </div>
+            <p id="graph-caption" class="muted">
+              鍩轰簬褰撳墠绔犺妭鍜屽綋鍓嶉槄璇昏繘搴﹀睍绀轰汉鐗┿€佹蹇典笌鍏崇郴銆傜偣鍑昏妭鐐规垨杈瑰彲鏌ョ湅鎽樿銆?            </p>
+            <div class="graph-toolbar">
+              <div class="graph-scope-switch" role="tablist" aria-label="knowledge graph scope">
+                <button id="graph-scope-chapter-btn" class="ghost-button graph-scope-button is-active" type="button">褰撳墠绔犺妭鍥?/button>
+                <button id="graph-scope-book-btn" class="ghost-button graph-scope-button" type="button">鍏ㄤ功鎬诲浘</button>
+              </div>
+              <button id="graph-refresh-btn" class="ghost-button" type="button">鍒锋柊鍥捐氨</button>
+            </div>
+            <div id="graph-canvas" class="graph-canvas">
+              <p class="muted">鐐瑰嚮鈥滄樉绀虹煡璇嗗浘璋扁€濆悗锛岃繖閲屼細灞曠ず褰撳墠绔犺妭鐨勭煡璇嗗浘璋便€?/p>
+            </div>
+            <div id="graph-detail" class="graph-detail muted">
+              閫夋嫨鍥句腑鐨勮妭鐐规垨杈瑰悗锛岃繖閲屼細鏄剧ず瀵瑰簲鐨勫叧绯昏鏄庢垨浜虹墿鎽樿銆?            </div>
           </section>
         </section>
 
@@ -195,31 +220,31 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Assistant</p>
-                <h3>对话工作台</h3>
+                <h3>瀵硅瘽宸ヤ綔鍙?/h3>
               </div>
               <div class="assistant-tabs" role="tablist" aria-label="assistant mode switch">
-                <button id="persona-mode-btn" class="mode-chip mode-chip-active" type="button">名家导读</button>
-                <button id="character-mode-btn" class="mode-chip" type="button">角色陪读</button>
+                <button id="persona-mode-btn" class="mode-chip mode-chip-active" type="button">鍚嶅瀵艰</button>
+                <button id="character-mode-btn" class="mode-chip" type="button">瑙掕壊闄</button>
               </div>
             </div>
 
             <div class="soft-block">
-              <p class="label">当前选中文本</p>
-              <p id="highlight-preview" class="preview-text">点击正文中的段落后，问答会围绕该段落展开。</p>
+              <p class="label">褰撳墠閫変腑鏂囨湰</p>
+              <p id="highlight-preview" class="preview-text">鐐瑰嚮姝ｆ枃涓殑娈佃惤鍚庯紝闂瓟浼氬洿缁曡娈佃惤灞曞紑銆?/p>
             </div>
 
-            <div id="assistant-status" class="assistant-status muted">当前使用名家导读模式。</div>
+            <div id="assistant-status" class="assistant-status muted">褰撳墠浣跨敤鍚嶅瀵艰妯″紡銆?/div>
 
             <div id="chat-history" class="chat-history" aria-live="polite"></div>
 
             <div class="composer">
               <textarea
                 id="question-input"
-                placeholder="围绕当前阅读内容继续提问，例如：这段为什么重要？这个角色此刻最在意什么？"
+                placeholder="鍥寸粫褰撳墠闃呰鍐呭缁х画鎻愰棶锛屼緥濡傦細杩欐涓轰粈涔堥噸瑕侊紵杩欎釜瑙掕壊姝ゅ埢鏈€鍦ㄦ剰浠€涔堬紵"
               ></textarea>
               <div class="composer-actions">
-                <button id="clear-chat-btn" class="ghost-button" type="button">清空对话</button>
-                <button id="ask-btn" class="primary-button" type="button">发送提问</button>
+                <button id="clear-chat-btn" class="ghost-button" type="button">娓呯┖瀵硅瘽</button>
+                <button id="ask-btn" class="primary-button" type="button">鍙戦€佹彁闂?/button>
               </div>
             </div>
           </section>
@@ -227,6 +252,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260518-graphiti-progress"></script>
+    <script src="/static/app.js?v=20260518-progress-v2"></script>
   </body>
 </html>

@@ -52,6 +52,14 @@ def build_test_epub_bytes() -> bytes:
     return raw_bytes
 
 
+class FakeTemporalGraphBuilder:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def build(self, record):
+        return app_module.build_temporal_graph(record)
+
+
 def test_graph_api_exposes_metadata_and_query():
     with TestClient(app) as client:
         metadata_response = client.get("/api/books/muse_demo_book/graph/metadata")
@@ -75,8 +83,27 @@ def test_graph_api_exposes_metadata_and_query():
         assert query_payload["graph_stats"]["chapter_count"] >= 2
         assert query_payload["hits"]
 
+        view_response = client.get("/api/books/muse_demo_book/graph/view?chapter=1&paragraph=1&limit=12")
+        assert view_response.status_code == 200
+        view_payload = view_response.json()
+        assert view_payload["scope"] == "chapter"
+        assert view_payload["chapter_index"] == 1
+        assert "nodes" in view_payload
+        assert "edges" in view_payload
+        assert view_payload["stats"]["node_count"] >= 0
+
+        book_view_response = client.get("/api/books/muse_demo_book/graph/view?chapter=2&paragraph=1&limit=12&scope=book")
+        assert book_view_response.status_code == 200
+        book_view_payload = book_view_response.json()
+        assert book_view_payload["scope"] == "book"
+        assert book_view_payload["chapter_index"] is None
+        assert "nodes" in book_view_payload
+        assert "edges" in book_view_payload
+        assert book_view_payload["stats"]["node_count"] >= 0
+
 
 def test_upload_endpoint_accepts_epub_and_builds_graph():
+    app_module.TemporalGraphBuilder = FakeTemporalGraphBuilder
     with TestClient(app) as client:
         response = client.post(
             "/api/upload",
@@ -114,6 +141,7 @@ def test_upload_endpoint_accepts_pdf_with_text_layer(monkeypatch):
             ]
 
     monkeypatch.setattr(ingest_parser, "PdfReader", FakeReader)
+    monkeypatch.setattr(app_module, "TemporalGraphBuilder", FakeTemporalGraphBuilder)
     with TestClient(app) as client:
         response = client.post(
             "/api/upload",

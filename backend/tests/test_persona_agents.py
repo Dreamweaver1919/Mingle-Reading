@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from backend.common.models import PersonaPromptPreviewRequest, PersonaRAGQueryRequest
 from backend.llm_memory.persona.persona_service import (
     build_persona_prompt_preview,
     get_persona_agent,
@@ -8,47 +9,59 @@ from backend.llm_memory.persona.persona_service import (
     resolve_persona_runtime,
     retrieve_persona_snippets,
 )
-from backend.common.models import PersonaPromptPreviewRequest, PersonaRAGQueryRequest
 
 
-def test_persona_agents_are_exposed_with_catalog_counts():
+def test_persona_agents_are_exposed_with_celebrity_skill_paths():
     agents = list_persona_agents()
     agent_ids = {agent.agent_id for agent in agents}
     assert {"neutral", "lu-xun", "mark-twain", "zhang-ailing"}.issubset(agent_ids)
 
     lu_xun = get_persona_agent("persona_lu_xun")
-    assert lu_xun.catalog_summary.total_sources >= 20
-    assert lu_xun.catalog_summary.voice_sources >= 10
+    assert "Celebrity-skill" in lu_xun.persona_pack_path
+    assert "Celebrity-skill" in lu_xun.catalog_path
+    assert lu_xun.catalog_summary.total_sources > 0
+    assert lu_xun.catalog_summary.voice_sources > 0
 
 
-def test_persona_kb_manifest_is_available():
+def test_persona_kb_manifest_is_built_from_celebrity_skill_bundle():
     manifest = get_persona_kb_manifest("mark-twain")
     assert manifest["persona_id"] == "persona_mark_twain"
-    assert manifest["document_counts"]["works"] >= 10
+    assert manifest["source"] == "celebrity-skill"
+    assert "MarkTwain-skill-main" in manifest["skill_root"]
+    assert manifest["snippet_counts"]["total_snippets"] > 0
+    assert manifest["document_counts"]["works"] > 0
 
 
-def test_persona_snippet_retrieval_returns_ranked_hits():
+def test_persona_snippet_retrieval_returns_ranked_hits_or_skill_fallback():
     hits = retrieve_persona_snippets(
         "zhang-ailing",
-        PersonaRAGQueryRequest(query="urban desire family power atmosphere", top_k=3),
+        PersonaRAGQueryRequest(query="都市 细节 关系 苍凉", top_k=3),
     )
     assert len(hits) >= 1
     assert hits[0].score > 0
+    assert hits[0].source_category in {
+        "works",
+        "voice_sources",
+        "biography_and_critical",
+        "skill_rules",
+        "overview",
+    }
 
 
-def test_persona_prompt_preview_contains_context():
+def test_persona_prompt_preview_contains_celebrity_skill_context():
     preview = build_persona_prompt_preview(
         "lu-xun",
         PersonaPromptPreviewRequest(
-            book_context="A passage about obedience, habit, and quiet pressure in daily life.",
-            question="How would this persona comment on social numbness?",
+            book_context="一段关于围观、麻木与服从压力的文本。",
+            question="这段体现了怎样的社会病理？",
             top_k=3,
         ),
     )
     assert preview.persona_id == "persona_lu_xun"
-    assert "你是 鲁迅 风格的中文阅读陪伴 agent" in preview.system_prompt
+    assert "Celebrity-skill" in preview.system_prompt
+    assert "鲁迅" in preview.system_prompt
     assert preview.retrieved_hits
-    assert "persona_pack" in preview.persona_context or "voice_sources" in preview.persona_context
+    assert any(hit.source_category in {"skill_rules", "voice_sources"} for hit in preview.retrieved_hits)
 
 
 def test_resolve_persona_runtime_requires_complete_env(monkeypatch):

@@ -30,13 +30,32 @@ CONCEPT_HINTS = {"freedom", "love", "fear", "truth", "memory", "dream", "justice
 STOP_ENTITY_NAMES = {"chapter", "section"}
 
 LOCATION_PREPOSITIONS = (" in ", " at ", " inside ", " within ", " near ", " from ", " to ")
-SPEECH_TERMS = ("said", "asked", "replied", "told", "answered", "whispered", "shouted")
+SPEECH_TERMS = ("said", "asked", "replied", "told", "answered", "whispered", "shouted", "speak", "speaks", "spoke")
 CONFLICT_TERMS = ("fought", "killed", "against", "war", "fight", "attacked", "argued", "blamed")
 AFFECTION_TERMS = ("loved", "cared for", "trusted", "admired", "protected", "helped")
 KINSHIP_TERMS = ("mother", "father", "brother", "sister", "son", "daughter", "husband", "wife", "family")
 
 STATEFUL_FAMILIES = {"location", "membership", "status"}
 UNDIRECTED_RELATION_TYPES = {"CO_PRESENT", "SPOKE_WITH", "CONFLICTS_WITH", "FAMILY_OF"}
+STATE_CHANGE_TERMS = (
+    "became",
+    "become",
+    "remained",
+    "left",
+    "arrived",
+    "returned",
+    "joined",
+    "quit",
+    "moved",
+    "stayed",
+    "变成",
+    "离开",
+    "来到",
+    "回到",
+    "加入",
+    "成为",
+)
+CHAPTER_CONSOLIDATION_FAMILIES = {"location", "membership", "status", "interaction", "identity"}
 
 
 def _slugify(value: str) -> str:
@@ -187,6 +206,46 @@ def _state_key(state_family: str, source_entity_id: str, directionality: Relatio
     return f"{state_family}|{source_entity_id}"
 
 
+def _entity_alias_forms(entity: EntityNode) -> set[str]:
+    return {
+        _slugify(entity.canonical_name),
+        *(_slugify(alias) for alias in entity.aliases),
+    }
+
+
+def _chunk_candidate_aliases(chunk: BookChunk) -> set[str]:
+    aliases: set[str] = set()
+    for name, _entity_type in _extract_entity_mentions(chunk):
+        aliases.add(_slugify(name))
+    return {alias for alias in aliases if alias}
+
+
+def _relation_trigger_score(text: str) -> int:
+    lowered = text.lower()
+    score = 0
+    if any(term in lowered for term in SPEECH_TERMS):
+        score += 2
+    if any(term in lowered for term in CONFLICT_TERMS):
+        score += 2
+    if any(term in lowered for term in AFFECTION_TERMS):
+        score += 2
+    if any(term in lowered for term in KINSHIP_TERMS):
+        score += 2
+    if any(term in lowered for term in STATE_CHANGE_TERMS):
+        score += 2
+    if any(token in text for token in ("“", "\"", "——", "—")):
+        score += 1
+    return score
+
+
+def approximate_packet_density(chunk: BookChunk) -> float:
+    source_count = int(chunk.metadata.get("source_paragraph_count", 1) or 1)
+    if source_count <= 0:
+        source_count = 1
+    entity_count = max(len(chunk.candidate_characters), len(_extract_entity_mentions(chunk)))
+    return entity_count / source_count
+
+
 class TemporalGraphBuilder:
     """Build a Graphiti-style temporal knowledge graph from paragraph episodes."""
 
@@ -221,6 +280,9 @@ class TemporalGraphBuilder:
                 "entity_extraction": extraction_backend,
                 "fact_extraction": extraction_backend,
                 "created_at": now,
+                "llm_calls": 0,
+                "llm_skipped": 0,
+                "chapter_consolidations": [],
             },
         )
 
@@ -254,7 +316,13 @@ class TemporalGraphBuilder:
                 current_snippet_id=chunk.chunk_id,
                 current_chapter_index=chunk.chapter_index,
                 current_paragraph_index=chunk.paragraph_index,
-                details={"phase": "episode-start"},
+                details={
+                    "phase": "episode-start",
+                    "source_paragraph_indices": chunk.metadata.get("source_paragraph_indices", []),
+                    "source_paragraph_count": chunk.metadata.get("source_paragraph_count", 1),
+                    "packet_token_count": chunk.metadata.get("packet_token_count", len(chunk.text)),
+                    "is_merged_packet": chunk.metadata.get("is_merged_packet", False),
+                },
             )
             llm_episode_extraction = self._extract_episode_with_llm(chunk=chunk, graph=graph)
             chapter_node_id = f"chapter_{chunk.chapter_index:03d}"
@@ -381,8 +449,33 @@ class TemporalGraphBuilder:
                     "phase": "episode-complete",
                     "entity_count": len(entity_ids),
                     "relation_count": len(relation_ids),
+                    "source_paragraph_indices": chunk.metadata.get("source_paragraph_indices", []),
+                    "source_paragraph_count": chunk.metadata.get("source_paragraph_count", 1),
+                    "packet_token_count": chunk.metadata.get("packet_token_count", len(chunk.text)),
+                    "is_merged_packet": chunk.metadata.get("is_merged_packet", False),
                 },
             )
+
+        self._emit_progress(
+            stage="chapter-consolidation",
+            title="Consolidating chapter facts",
+            message="Normalizing chapter-level aliases and relation state families before higher-level graph assembly.",
+            processed_snippets=total_chunks,
+            total_snippets=total_chunks,
+            details={
+                "phase": "chapter-consolidation",
+                "chapter_count": len(chapter_entities),
+                "active_entity_count": len(graph.entities),
+                "active_relation_count": len(graph.relations),
+            },
+        )
+        self._consolidate_chapters(
+            graph=graph,
+            chapter_entities=chapter_entities,
+            entity_id_by_alias=entity_id_by_alias,
+            active_relation_by_signature=active_relation_by_signature,
+            active_state_relation_by_key=active_state_relation_by_key,
+        )
 
         self._emit_progress(
             stage="graph-community-build",
@@ -1050,6 +1143,361 @@ class TemporalGraphBuilder:
             for relation_id in timeline_entry.relation_ids:
                 if relation_id not in chapter.relation_ids:
                     chapter.relation_ids.append(relation_id)
+
+    def _should_call_llm(
+        self,
+        *,
+        chunk: BookChunk,
+        graph: TemporalContextGraph,
+    ) -> tuple[bool, dict[str, object]]:
+        if self.extractor_runtime is None:
+            return False, {"score": 0, "reasons": ["no-runtime"]}
+        score = 0
+        reasons: list[str] = []
+        current_aliases = _chunk_candidate_aliases(chunk)
+        known_aliases = {
+            alias
+            for entity in graph.entities.values()
+            for alias in _entity_alias_forms(entity)
+            if entity.last_seen_chapter < chunk.chapter_index
+            or (
+                entity.last_seen_chapter == chunk.chapter_index
+                and entity.last_seen_paragraph < chunk.paragraph_index
+            )
+        }
+        new_aliases = sorted(alias for alias in current_aliases if alias and alias not in known_aliases)
+        if new_aliases:
+            score += 2
+            reasons.append("new-entity")
+        trigger_score = _relation_trigger_score(chunk.text)
+        if trigger_score:
+            score += trigger_score
+            reasons.append("relation-trigger")
+        if self._estimate_state_conflict_candidates(chunk=chunk, graph=graph) > 0:
+            score += 4
+            reasons.append("state-conflict")
+        source_paragraph_count = int(chunk.metadata.get("source_paragraph_count", 1) or 1)
+        if source_paragraph_count > 1:
+            score += 1
+            reasons.append("merged-packet")
+        if len(_extract_entity_mentions(chunk)) >= 2 and approximate_packet_density(chunk) >= 0.55:
+            score += 1
+            reasons.append("high-entity-density")
+        return score >= 3, {
+            "score": score,
+            "reasons": reasons,
+            "new_aliases": new_aliases,
+            "source_paragraph_count": source_paragraph_count,
+        }
+
+    def _estimate_state_conflict_candidates(
+        self,
+        *,
+        chunk: BookChunk,
+        graph: TemporalContextGraph,
+    ) -> int:
+        aliases = _chunk_candidate_aliases(chunk)
+        if not aliases:
+            return 0
+        conflict_count = 0
+        for edge in graph.relations.values():
+            if edge.status != "active" or edge.state_family not in STATEFUL_FAMILIES:
+                continue
+            source_entity = graph.entities.get(edge.source_entity_id)
+            if source_entity is None:
+                continue
+            if not aliases.intersection(_entity_alias_forms(source_entity)):
+                continue
+            if edge.state_family == "location" and any(token in chunk.text.lower() for token in LOCATION_PREPOSITIONS):
+                conflict_count += 1
+            elif edge.state_family in {"membership", "status"} and _relation_trigger_score(chunk.text) > 0:
+                conflict_count += 1
+        return conflict_count
+
+    def _extract_episode_with_llm(
+        self,
+        *,
+        chunk: BookChunk,
+        graph: TemporalContextGraph,
+    ) -> llm_extraction.EpisodeGraphExtraction | None:
+        if self.extractor_runtime is None:
+            return None
+        should_call, gate = self._should_call_llm(chunk=chunk, graph=graph)
+        chunk.metadata["llm_gate"] = gate
+        if not should_call:
+            graph.metadata["llm_skipped"] = int(graph.metadata.get("llm_skipped", 0)) + 1
+            self._emit_progress(
+                stage="llm-skipped",
+                title="Skipping LLM extraction",
+                message=f"Skipping LLM extraction for {chunk.chunk_id}; gate reasons: {', '.join(gate['reasons']) or 'low-signal'}.",
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={
+                    "phase": "llm-skipped",
+                    "source_paragraph_indices": chunk.metadata.get("source_paragraph_indices", []),
+                    "source_paragraph_count": chunk.metadata.get("source_paragraph_count", 1),
+                    "packet_token_count": chunk.metadata.get("packet_token_count", len(chunk.text)),
+                    "is_merged_packet": chunk.metadata.get("is_merged_packet", False),
+                    **gate,
+                },
+            )
+            return None
+
+        known_entities = [
+            llm_extraction.KnownEntityCandidate(
+                entity_id=entity.entity_id,
+                canonical_name=entity.canonical_name,
+                entity_type=entity.entity_type,
+                aliases=entity.aliases,
+                mention_count=entity.mention_count,
+                last_seen_chapter=entity.last_seen_chapter,
+                last_seen_paragraph=entity.last_seen_paragraph,
+            )
+            for entity in sorted(graph.entities.values(), key=lambda item: item.mention_count, reverse=True)
+            if entity.last_seen_chapter < chunk.chapter_index
+            or (
+                entity.last_seen_chapter == chunk.chapter_index
+                and entity.last_seen_paragraph < chunk.paragraph_index
+            )
+        ]
+        recent_episode_contexts = [
+            episode.text for episode in sorted(graph.episodes.values(), key=lambda item: item.episode_index)[-3:]
+        ]
+        try:
+            graph.metadata["llm_calls"] = int(graph.metadata.get("llm_calls", 0)) + 1
+            self._emit_progress(
+                stage="llm-request-dispatched",
+                title="LLM entity/fact resolution",
+                message=f"Dispatching entity/fact extraction prompt for {chunk.chunk_id}.",
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={
+                    "phase": "llm-request-dispatched",
+                    "provider": self.extractor_runtime.provider_label,
+                    "source_paragraph_indices": chunk.metadata.get("source_paragraph_indices", []),
+                    "source_paragraph_count": chunk.metadata.get("source_paragraph_count", 1),
+                    "packet_token_count": chunk.metadata.get("packet_token_count", len(chunk.text)),
+                    "is_merged_packet": chunk.metadata.get("is_merged_packet", False),
+                    **gate,
+                },
+            )
+            extraction = llm_extraction.extract_episode_graph_with_llm(
+                runtime=self.extractor_runtime,
+                chunk=chunk,
+                known_entities=known_entities,
+                recent_episode_contexts=recent_episode_contexts,
+            )
+            self._emit_progress(
+                stage="llm-response-received",
+                title="LLM response received",
+                message=(
+                    f"Received LLM extraction for {chunk.chunk_id}: "
+                    f"{len(extraction.entities)} entities, {len(extraction.facts)} facts."
+                ),
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={
+                    "phase": "llm-response-received",
+                    "entity_candidates": len(extraction.entities),
+                    "fact_candidates": len(extraction.facts),
+                    "source_paragraph_indices": chunk.metadata.get("source_paragraph_indices", []),
+                    "source_paragraph_count": chunk.metadata.get("source_paragraph_count", 1),
+                    "packet_token_count": chunk.metadata.get("packet_token_count", len(chunk.text)),
+                    "is_merged_packet": chunk.metadata.get("is_merged_packet", False),
+                    **gate,
+                },
+            )
+            return extraction
+        except Exception as exc:
+            graph.metadata.setdefault("llm_extraction_warnings", [])
+            graph.metadata["llm_extraction_warnings"].append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "chapter_index": chunk.chapter_index,
+                    "paragraph_index": chunk.paragraph_index,
+                    "reason": str(exc),
+                }
+            )
+            if self.strict_llm_extraction:
+                raise RuntimeError(f"strict llm extraction failed for {chunk.chunk_id}: {exc}") from exc
+            self._emit_progress(
+                stage="llm-request-failed",
+                title="LLM extraction failed, falling back",
+                message=f"LLM extraction failed for {chunk.chunk_id}; falling back to heuristic extraction.",
+                current_snippet_id=chunk.chunk_id,
+                current_chapter_index=chunk.chapter_index,
+                current_paragraph_index=chunk.paragraph_index,
+                details={
+                    "phase": "llm-request-failed",
+                    "error": str(exc),
+                    "source_paragraph_indices": chunk.metadata.get("source_paragraph_indices", []),
+                    "source_paragraph_count": chunk.metadata.get("source_paragraph_count", 1),
+                    "packet_token_count": chunk.metadata.get("packet_token_count", len(chunk.text)),
+                    "is_merged_packet": chunk.metadata.get("is_merged_packet", False),
+                    **gate,
+                },
+            )
+            return None
+
+    def _consolidate_chapters(
+        self,
+        *,
+        graph: TemporalContextGraph,
+        chapter_entities: dict[int, set[str]],
+        entity_id_by_alias: dict[str, str],
+        active_relation_by_signature: dict[str, str],
+        active_state_relation_by_key: dict[str, str],
+    ) -> None:
+        for chapter_index, entity_ids in chapter_entities.items():
+            canonical_groups: dict[str, list[str]] = defaultdict(list)
+            for entity_id in entity_ids:
+                entity = graph.entities.get(entity_id)
+                if entity is None:
+                    continue
+                canonical_groups[_slugify(entity.canonical_name)].append(entity_id)
+            merged_pairs = 0
+            for group in canonical_groups.values():
+                if len(group) < 2:
+                    continue
+                primary_id = max(group, key=lambda item: graph.entities[item].mention_count)
+                for secondary_id in group:
+                    if secondary_id == primary_id or secondary_id not in graph.entities:
+                        continue
+                    self._merge_entity_into_primary(
+                        graph=graph,
+                        primary_id=primary_id,
+                        secondary_id=secondary_id,
+                        entity_id_by_alias=entity_id_by_alias,
+                    )
+                    entity_ids.discard(secondary_id)
+                    entity_ids.add(primary_id)
+                    merged_pairs += 1
+            deduped_relations = self._deduplicate_relations_for_chapter(graph=graph, chapter_index=chapter_index)
+            graph.metadata["chapter_consolidations"].append(
+                {
+                    "chapter_index": chapter_index,
+                    "merged_entities": merged_pairs,
+                    "deduplicated_relations": deduped_relations,
+                }
+            )
+        self._rebuild_relation_indexes(
+            graph=graph,
+            active_relation_by_signature=active_relation_by_signature,
+            active_state_relation_by_key=active_state_relation_by_key,
+        )
+
+    def _merge_entity_into_primary(
+        self,
+        *,
+        graph: TemporalContextGraph,
+        primary_id: str,
+        secondary_id: str,
+        entity_id_by_alias: dict[str, str],
+    ) -> None:
+        primary = graph.entities.get(primary_id)
+        secondary = graph.entities.get(secondary_id)
+        if primary is None or secondary is None:
+            return
+        primary.aliases = sorted(set(primary.aliases).union(secondary.aliases).union({secondary.canonical_name}))
+        primary.mention_count += secondary.mention_count
+        primary.episode_ids = sorted(set(primary.episode_ids).union(secondary.episode_ids))
+        if primary.first_seen_chapter == 0 or (
+            secondary.first_seen_chapter
+            and (secondary.first_seen_chapter, secondary.first_seen_paragraph)
+            < (primary.first_seen_chapter, primary.first_seen_paragraph)
+        ):
+            primary.first_seen_chapter = secondary.first_seen_chapter
+            primary.first_seen_paragraph = secondary.first_seen_paragraph
+        if (secondary.last_seen_chapter, secondary.last_seen_paragraph) > (
+            primary.last_seen_chapter,
+            primary.last_seen_paragraph,
+        ):
+            primary.last_seen_chapter = secondary.last_seen_chapter
+            primary.last_seen_paragraph = secondary.last_seen_paragraph
+        for alias in _entity_alias_forms(primary).union(_entity_alias_forms(secondary)):
+            entity_id_by_alias[alias] = primary_id
+        for episode in graph.episodes.values():
+            if secondary_id in episode.entity_ids:
+                episode.entity_ids = [primary_id if entity_id == secondary_id else entity_id for entity_id in episode.entity_ids]
+                episode.entity_ids = sorted(set(episode.entity_ids))
+        for chapter in graph.chapters.values():
+            if secondary_id in chapter.entity_ids:
+                chapter.entity_ids = sorted({primary_id if entity_id == secondary_id else entity_id for entity_id in chapter.entity_ids})
+        for relation in graph.relations.values():
+            if relation.source_entity_id == secondary_id:
+                relation.source_entity_id = primary_id
+            if relation.target_entity_id == secondary_id:
+                relation.target_entity_id = primary_id
+        del graph.entities[secondary_id]
+
+    def _deduplicate_relations_for_chapter(self, *, graph: TemporalContextGraph, chapter_index: int) -> int:
+        seen: dict[tuple[str, str, str], str] = {}
+        removed = 0
+        for edge_id, relation in list(graph.relations.items()):
+            if relation.valid_at_chapter != chapter_index or relation.state_family not in CHAPTER_CONSOLIDATION_FAMILIES:
+                continue
+            relation.fact_signature = _fact_signature(
+                relation_type=relation.relation_type,
+                state_family=relation.state_family,
+                source_entity_id=relation.source_entity_id,
+                target_entity_id=relation.target_entity_id,
+                directionality=relation.directionality,
+            )
+            dedupe_key = (relation.fact_signature, relation.status, str(relation.invalidated_by_edge_id or ""))
+            existing_edge_id = seen.get(dedupe_key)
+            if existing_edge_id is None:
+                seen[dedupe_key] = edge_id
+                continue
+            existing = graph.relations[existing_edge_id]
+            existing.weight += relation.weight
+            existing.episode_ids = sorted(set(existing.episode_ids).union(relation.episode_ids))
+            existing.provenance.extend(relation.provenance)
+            existing.metadata["confidence"] = max(
+                float(existing.metadata.get("confidence", 0.0)),
+                float(relation.metadata.get("confidence", 0.0)),
+            )
+            for chapter in graph.chapters.values():
+                if edge_id in chapter.relation_ids:
+                    chapter.relation_ids = [existing_edge_id if rid == edge_id else rid for rid in chapter.relation_ids]
+                    chapter.relation_ids = sorted(set(chapter.relation_ids))
+            for episode in graph.episodes.values():
+                if edge_id in episode.relation_ids:
+                    episode.relation_ids = [existing_edge_id if rid == edge_id else rid for rid in episode.relation_ids]
+                    episode.relation_ids = sorted(set(episode.relation_ids))
+            del graph.relations[edge_id]
+            removed += 1
+        return removed
+
+    def _rebuild_relation_indexes(
+        self,
+        *,
+        graph: TemporalContextGraph,
+        active_relation_by_signature: dict[str, str],
+        active_state_relation_by_key: dict[str, str],
+    ) -> None:
+        active_relation_by_signature.clear()
+        active_state_relation_by_key.clear()
+        for relation in graph.relations.values():
+            relation.fact_signature = _fact_signature(
+                relation_type=relation.relation_type,
+                state_family=relation.state_family,
+                source_entity_id=relation.source_entity_id,
+                target_entity_id=relation.target_entity_id,
+                directionality=relation.directionality,
+            )
+            if relation.status == "active":
+                active_relation_by_signature[relation.fact_signature] = relation.edge_id
+                state_key = _state_key(
+                    relation.state_family,
+                    relation.source_entity_id,
+                    relation.directionality,
+                    relation.target_entity_id,
+                )
+                if state_key:
+                    active_state_relation_by_key[state_key] = relation.edge_id
 
 
 def build_temporal_graph(book: BookRecord) -> TemporalContextGraph:
