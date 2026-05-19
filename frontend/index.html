@@ -1,10 +1,10 @@
 ﻿<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Muse Reading</title>
-    <link rel="stylesheet" href="/static/main.css?v=20260518-progress-v2" />
+    <link rel="stylesheet" href="/static/main.css?v=20260519-clean-ui" />
   </head>
   <body>
     <div class="app-frame">
@@ -28,13 +28,15 @@
           </div>
           <span id="pending-label" class="pending-label">idle</span>
         </div>
-        <p id="pending-description" class="pending-description">上传文档后，这里会显示文本抽取、文段构建、LLM 抽取和知识图谱写入的实时进度。</p>
+        <p id="pending-description" class="pending-description">
+          After a document is uploaded, this panel will show real-time text extraction, layered packet construction, LLM extraction, and graph persistence progress.
+        </p>
         <div class="pending-track">
           <div id="pending-bar" class="pending-bar"></div>
         </div>
         <div class="pending-meta">
           <strong id="pending-percent" class="pending-percent">0%</strong>
-          <span id="pending-step-caption" class="pending-step-caption">等待新的处理任务开始。</span>
+          <span id="pending-step-caption" class="pending-step-caption">Waiting for the next processing task to begin.</span>
         </div>
       </section>
 
@@ -42,25 +44,27 @@
         <aside class="column column-left">
           <section class="panel panel-hero">
             <p class="eyebrow">Reader Setup</p>
-            <h2 class="panel-title">娌夋蹈寮忛槄璇诲櫒</h2>
-            <p class="muted">涓婁紶鏂囨湰鍚庤嚜鍔ㄥ垏鐗囥€佸缓鍥撅紝骞惰繘鍏ラ槄璇汇€佽鑹查櫔璇讳笌鍚嶅瀵艰瀵硅瘽銆?/p>
+            <h2 class="panel-title">Immersive Reader</h2>
+            <p class="muted">
+              Upload TXT, PDF, or EPUB files. The system will extract text, build layered snippets, construct a temporal knowledge graph, and connect literary and character agents.
+            </p>
           </section>
 
           <section class="panel">
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Import</p>
-                <h3>涓婁紶鍏ュ彛</h3>
+                <h3>Import</h3>
               </div>
               <span class="badge">TXT / PDF / EPUB</span>
             </div>
             <form id="upload-form" class="stack">
               <label class="upload-box" for="file-input">
-                <strong>瀵煎叆闃呰鏂囨湰</strong>
-                <span class="muted">鏀寔 `.txt`銆乣.pdf`銆乣.epub`銆傛壂鎻?PDF 鍥犵己灏戞枃鏈眰锛屽綋鍓嶆殏涓嶆敮鎸併€?/span>
+                <strong>Import reading text</strong>
+                <span class="muted">Supports `.txt`, `.pdf`, and `.epub`. After upload, the app will extract the text and build a Graphiti-style temporal knowledge graph.</span>
               </label>
               <input id="file-input" type="file" accept=".txt,.pdf,.epub,application/pdf,application/epub+zip" />
-              <button class="primary-button" type="submit">涓婁紶骞跺紑濮嬮槄璇?/button>
+              <button class="primary-button" type="submit">Upload and Start Reading</button>
             </form>
           </section>
 
@@ -68,14 +72,14 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Literary Agent</p>
-                <h3>鍚嶅瀵艰</h3>
+                <h3>Literary Guide</h3>
               </div>
               <span id="persona-type-badge" class="badge badge-warm">literary_master</span>
             </div>
             <div class="stack">
-              <select id="persona-select" aria-label="閫夋嫨鍚嶅瀵艰"></select>
+              <select id="persona-select" aria-label="Choose literary agent"></select>
               <div class="persona-meta">
-                <p id="persona-name" class="persona-name">瀵艰 agent</p>
+                <p id="persona-name" class="persona-name">Literary Agent</p>
                 <p id="persona-citation" class="muted"></p>
                 <div class="pill-row" id="persona-traits"></div>
               </div>
@@ -86,18 +90,18 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Character Agent</p>
-                <h3>瑙掕壊闄</h3>
+                <h3>Book Character</h3>
               </div>
               <span class="badge badge-cool">book_character</span>
             </div>
             <div class="stack">
-              <label class="label" for="character-select">瑙掕壊鍊欓€?/label>
-              <select id="character-select" aria-label="閫夋嫨瑙掕壊"></select>
-              <label class="label" for="character-input">鎴栨墜鍔ㄨ緭鍏ヨ鑹插悕</label>
-              <input id="character-input" class="text-input" type="text" placeholder="杈撳叆瑙掕壊鍚嶅悗鐢熸垚瑙掕壊鐢诲儚" />
-              <button id="character-generate-btn" class="secondary-button" type="button">鐢熸垚瑙掕壊鐢诲儚</button>
+              <label class="label" for="character-select">Character Candidates</label>
+              <select id="character-select" aria-label="Choose book character"></select>
+              <label class="label" for="character-input">Or enter a character name manually</label>
+              <input id="character-input" class="text-input" type="text" placeholder="Enter a character name and build a profile" />
+              <button id="character-generate-btn" class="secondary-button" type="button">Build Character Profile</button>
               <div id="character-profile-card" class="character-profile-card">
-                <p class="muted">鎵撳紑涔︾睄鍚庝細鏍规嵁宸茶鍐呭鐢熸垚瑙掕壊鍊欓€夛紝骞跺彲杩涗竴姝ョ敓鎴愯鑹茬敾鍍忋€?/p>
+                <p class="muted">Choose a candidate or enter a character name. This panel will show the profile, relationship summary, and current visible scope.</p>
               </div>
             </div>
           </section>
@@ -106,9 +110,9 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Shelf</p>
-                <h3>涔︽灦鍒楄〃</h3>
+                <h3>Shelf</h3>
               </div>
-              <span id="book-count" class="badge">0 鏈?/span>
+              <span id="book-count" class="badge">0 books</span>
             </div>
             <ul id="book-list" class="book-list"></ul>
           </section>
@@ -118,20 +122,20 @@
           <section class="panel panel-reader-hero">
             <div class="reader-summary">
               <p class="eyebrow">Reader Workspace</p>
-              <h2 id="book-title">璇烽€夋嫨涓€鏈功寮€濮嬮槄璇?/h2>
-              <p id="book-subtitle" class="muted">椤甸潰浼氳窡韪珷鑺傘€佹钀戒笌缈婚〉浣嶇疆锛屽苟鍚屾鏋勯€?reading_progress銆?/p>
+              <h2 id="book-title">Choose a book to begin</h2>
+              <p id="book-subtitle" class="muted">After upload, the app will display chapters, reading text, progress, and graph status.</p>
             </div>
             <div class="stats-grid">
               <article class="stat-card">
-                <span class="label">褰撳墠绔犺妭</span>
+                <span class="label">Current Chapter</span>
                 <strong id="hero-chapter">-</strong>
               </article>
               <article class="stat-card">
-                <span class="label">娈佃惤瀹氫綅</span>
+                <span class="label">Current Paragraph</span>
                 <strong id="hero-paragraph">-</strong>
               </article>
               <article class="stat-card">
-                <span class="label">鍋滅暀鏃堕暱</span>
+                <span class="label">Dwell Time</span>
                 <strong id="hero-dwell">0s</strong>
               </article>
             </div>
@@ -140,20 +144,20 @@
           <section class="panel toolbar-panel">
             <div class="toolbar-grid">
               <div class="field-block">
-                <label class="label" for="chapter-select">绔犺妭瀵艰埅</label>
-                <select id="chapter-select" aria-label="閫夋嫨绔犺妭"></select>
+                <label class="label" for="chapter-select">Chapter Navigation</label>
+                <select id="chapter-select" aria-label="Choose chapter"></select>
               </div>
               <div class="field-block">
-                <label class="label" for="paragraph-jump">娈佃惤瀹氫綅</label>
-                <select id="paragraph-jump" aria-label="閫夋嫨娈佃惤"></select>
+                <label class="label" for="paragraph-jump">Paragraph Jump</label>
+                <select id="paragraph-jump" aria-label="Choose paragraph"></select>
               </div>
               <div class="field-block field-wide">
-                <span class="label">闃呰鐘舵€?/span>
-                <p id="progress-text" class="muted">灏氭湭鍔犺浇涔︾睄銆?/p>
+                <span class="label">Reading Progress</span>
+                <p id="progress-text" class="muted">No reading progress is available yet.</p>
               </div>
               <div class="field-actions">
-                <button id="summary-btn" class="secondary-button" type="button">绔犺妭鎬荤粨</button>
-                <button id="graph-toggle-btn" class="secondary-button" type="button">鏄剧ず鐭ヨ瘑鍥捐氨</button>
+                <button id="summary-btn" class="secondary-button" type="button">Summarize Chapter</button>
+                <button id="graph-toggle-btn" class="secondary-button" type="button">Show Knowledge Graph</button>
               </div>
             </div>
           </section>
@@ -163,9 +167,9 @@
               <div class="panel-heading">
                 <div>
                   <p class="eyebrow">Outline</p>
-                  <h3>绔犺妭鐩綍</h3>
+                  <h3>Outline</h3>
                 </div>
-                <span id="toc-progress" class="badge">鏈紑濮?/span>
+                <span id="toc-progress" class="badge">Not started</span>
               </div>
               <div id="chapter-nav" class="chapter-nav"></div>
             </section>
@@ -174,17 +178,17 @@
               <div class="panel-heading">
                 <div>
                   <p class="eyebrow">Reader</p>
-                  <h3>姝ｆ枃闃呰</h3>
+                  <h3>Reading View</h3>
                 </div>
                 <span class="badge badge-cool">In-text Bubbles</span>
               </div>
               <div class="page-toolbar">
-                <button id="prev-page-btn" class="secondary-button page-nav-button" type="button">涓婁竴椤?/button>
+                <button id="prev-page-btn" class="secondary-button page-nav-button" type="button">Previous Page</button>
                 <div class="page-status">
                   <span class="label">Page</span>
                   <strong id="page-indicator">- / -</strong>
                 </div>
-                <button id="next-page-btn" class="secondary-button page-nav-button" type="button">涓嬩竴椤?/button>
+                <button id="next-page-btn" class="secondary-button page-nav-button" type="button">Next Page</button>
               </div>
               <div id="passage-list" class="page-viewer"></div>
             </section>
@@ -194,24 +198,26 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Knowledge Graph</p>
-                <h3>褰撳墠绔犺妭鍥捐氨瑙嗗浘</h3>
+                <h3>Knowledge Graph View</h3>
               </div>
               <span id="graph-stats-badge" class="badge badge-cool">0 nodes</span>
             </div>
             <p id="graph-caption" class="muted">
-              鍩轰簬褰撳墠绔犺妭鍜屽綋鍓嶉槄璇昏繘搴﹀睍绀轰汉鐗┿€佹蹇典笌鍏崇郴銆傜偣鍑昏妭鐐规垨杈瑰彲鏌ョ湅鎽樿銆?            </p>
+              This panel can show either the current chapter graph or the whole-book graph, filtered by your visible reading scope.
+            </p>
             <div class="graph-toolbar">
               <div class="graph-scope-switch" role="tablist" aria-label="knowledge graph scope">
-                <button id="graph-scope-chapter-btn" class="ghost-button graph-scope-button is-active" type="button">褰撳墠绔犺妭鍥?/button>
-                <button id="graph-scope-book-btn" class="ghost-button graph-scope-button" type="button">鍏ㄤ功鎬诲浘</button>
+                <button id="graph-scope-chapter-btn" class="ghost-button graph-scope-button is-active" type="button">Current Chapter</button>
+                <button id="graph-scope-book-btn" class="ghost-button graph-scope-button" type="button">Whole Book</button>
               </div>
-              <button id="graph-refresh-btn" class="ghost-button" type="button">鍒锋柊鍥捐氨</button>
+              <button id="graph-refresh-btn" class="ghost-button" type="button">Refresh Graph</button>
             </div>
             <div id="graph-canvas" class="graph-canvas">
-              <p class="muted">鐐瑰嚮鈥滄樉绀虹煡璇嗗浘璋扁€濆悗锛岃繖閲屼細灞曠ず褰撳墠绔犺妭鐨勭煡璇嗗浘璋便€?/p>
+              <p class="muted">Click Show Knowledge Graph to display nodes and relations inside the current reading scope.</p>
             </div>
             <div id="graph-detail" class="graph-detail muted">
-              閫夋嫨鍥句腑鐨勮妭鐐规垨杈瑰悗锛岃繖閲屼細鏄剧ず瀵瑰簲鐨勫叧绯昏鏄庢垨浜虹墿鎽樿銆?            </div>
+              Click a node to inspect the entity summary, or click an edge to inspect the relation and its valid position.
+            </div>
           </section>
         </section>
 
@@ -220,31 +226,31 @@
             <div class="panel-heading">
               <div>
                 <p class="eyebrow">Assistant</p>
-                <h3>瀵硅瘽宸ヤ綔鍙?/h3>
+                <h3>Reading Assistant</h3>
               </div>
               <div class="assistant-tabs" role="tablist" aria-label="assistant mode switch">
-                <button id="persona-mode-btn" class="mode-chip mode-chip-active" type="button">鍚嶅瀵艰</button>
-                <button id="character-mode-btn" class="mode-chip" type="button">瑙掕壊闄</button>
+                <button id="persona-mode-btn" class="mode-chip mode-chip-active" type="button">Literary Agent</button>
+                <button id="character-mode-btn" class="mode-chip" type="button">Character Agent</button>
               </div>
             </div>
 
             <div class="soft-block">
-              <p class="label">褰撳墠閫変腑鏂囨湰</p>
-              <p id="highlight-preview" class="preview-text">鐐瑰嚮姝ｆ枃涓殑娈佃惤鍚庯紝闂瓟浼氬洿缁曡娈佃惤灞曞紑銆?/p>
+              <p class="label">Current Selection</p>
+              <p id="highlight-preview" class="preview-text">Click a paragraph in the reading view to preview the selected text and nearby context here.</p>
             </div>
 
-            <div id="assistant-status" class="assistant-status muted">褰撳墠浣跨敤鍚嶅瀵艰妯″紡銆?/div>
+            <div id="assistant-status" class="assistant-status muted">The assistant is currently in literary agent mode.</div>
 
             <div id="chat-history" class="chat-history" aria-live="polite"></div>
 
             <div class="composer">
               <textarea
                 id="question-input"
-                placeholder="鍥寸粫褰撳墠闃呰鍐呭缁х画鎻愰棶锛屼緥濡傦細杩欐涓轰粈涔堥噸瑕侊紵杩欎釜瑙掕壊姝ゅ埢鏈€鍦ㄦ剰浠€涔堬紵"
+                placeholder="Ask about the current reading context, for example: Why is this passage important? What is this character feeling right now?"
               ></textarea>
               <div class="composer-actions">
-                <button id="clear-chat-btn" class="ghost-button" type="button">娓呯┖瀵硅瘽</button>
-                <button id="ask-btn" class="primary-button" type="button">鍙戦€佹彁闂?/button>
+                <button id="clear-chat-btn" class="ghost-button" type="button">Clear Chat</button>
+                <button id="ask-btn" class="primary-button" type="button">Send Question</button>
               </div>
             </div>
           </section>
@@ -252,6 +258,7 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260518-progress-v2"></script>
+    <script src="/static/app.js?v=20260519-clean-ui"></script>
   </body>
 </html>
+

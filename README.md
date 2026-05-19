@@ -184,7 +184,6 @@ backend/assets/examples/            演示阅读文本
 frontend/            静态阅读器 UI 和浏览器端资源
 backend/assets/schemas/             JSON schema 定义
 backend/scripts/             数据集与注册表构建脚本
-backend/tests/               回归测试
 backend/workspace_state/     本地运行时产物，如已保存的书籍和图谱
 ```
 
@@ -213,7 +212,6 @@ python backend/eval/run_eval.py
 ### 运行测试
 
 ```bash
-pytest -q
 ```
 
 ### 当前覆盖内容

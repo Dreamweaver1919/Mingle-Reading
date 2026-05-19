@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from threading import Thread
@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.api.upload_jobs import upload_job_registry
-from backend.assets.data.data_processing_scripts.ingest.parser import (
+from backend.data_pipeline.ingest.parser import (
     SUPPORTED_UPLOAD_SUFFIXES,
     UploadTextExtractionError,
     UnsupportedUploadFormatError,
@@ -18,9 +18,9 @@ from backend.assets.data.data_processing_scripts.ingest.parser import (
     read_uploaded_text,
     slugify,
 )
-from backend.assets.data.data_processing_scripts.storage import list_books, load_book, save_book
-from backend.common.config import EXAMPLES_DIR, ROOT_DIR, UPLOADS_DIR
-from backend.common.models import (
+from backend.data_pipeline.storage import list_books, load_book, save_book
+from backend.config import EXAMPLES_DIR, ROOT_DIR, UPLOADS_DIR
+from backend.api.schemas import (
     CharacterChatRequest,
     CharacterProfileRequest,
     InlineBubbleRequest,
@@ -30,19 +30,19 @@ from backend.common.models import (
     SummaryRequest,
     UploadResponse,
 )
-from backend.knowledge_base.character.service import (
+from backend.agents.character.service import (
     answer_as_character,
     generate_character_profile,
     generate_inline_bubbles,
     list_character_candidates,
 )
-from backend.knowledge_base.graph.builder import TemporalGraphBuilder, build_temporal_graph
-from backend.knowledge_base.graph.models import GraphQuery
-from backend.knowledge_base.graph.retrieval import TemporalGraphRetriever
-from backend.knowledge_base.graph.storage import load_graph, load_graph_metadata, save_graph
-from backend.knowledge_base.qa.answering import build_answer
-from backend.llm_memory.orchestration.service import OrchestrationService
-from backend.llm_memory.persona.persona_service import (
+from backend.knowledge_graph.builder import TemporalGraphBuilder, build_temporal_graph
+from backend.knowledge_graph.models import GraphQuery
+from backend.knowledge_graph.retrieval import TemporalGraphRetriever
+from backend.knowledge_graph.storage import load_graph, load_graph_metadata, save_graph
+from backend.agents.celebrity.answering import build_answer
+from backend.knowledge_graph.orchestration.service import OrchestrationService
+from backend.agents.celebrity.persona_service import (
     PersonaAgentConfigurationError,
     PersonaAgentInvocationError,
     build_persona_prompt_preview,
@@ -52,7 +52,7 @@ from backend.llm_memory.persona.persona_service import (
     list_personas,
     retrieve_persona_snippets,
 )
-from backend.llm_memory.summary.chapter_summary import summarize_chapter
+from backend.agents.celebrity.chapter_summary import summarize_chapter
 
 
 app = FastAPI(title="Muse Reading MVP", version="0.1.0")
@@ -222,10 +222,26 @@ def ensure_demo_book_loaded() -> None:
     demo_path = EXAMPLES_DIR / "muse_demo_book.txt"
     if not demo_path.exists():
         return
-    title = demo_path.stem
-    record = build_book_record(title=title, raw_text=demo_path.read_text(encoding="utf-8"), source_path=demo_path)
-    save_book(record)
-    save_graph(build_temporal_graph(record))
+    book_id = slugify(demo_path.stem)
+
+    try:
+        load_book(book_id)
+    except FileNotFoundError:
+        record = build_book_record(
+            title=demo_path.stem,
+            raw_text=demo_path.read_text(encoding="utf-8"),
+            source_path=demo_path,
+        )
+        save_book(record)
+    else:
+        record = None
+
+    try:
+        load_graph(book_id)
+    except FileNotFoundError:
+        if record is None:
+            record = load_book(book_id)
+        save_graph(build_temporal_graph(record))
 
 
 def get_or_build_book(book_id: str):
@@ -697,3 +713,4 @@ def chapter_summary(request: SummaryRequest):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PersonaAgentInvocationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+

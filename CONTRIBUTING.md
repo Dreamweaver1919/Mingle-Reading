@@ -41,7 +41,6 @@ python main.py
 - `frontend/`：静态 HTML/CSS/JS 阅读器 UI
 - `backend/assets/data/`、`backend/assets/schemas/`、`backend/benchmarks/`、`backend/eval/`：数据集、schema 和评测资产
 - `backend/scripts/`：构建和数据集工具脚本
-- `backend/tests/`：MVP 的 pytest 覆盖
 
 ## 开发期望
 
@@ -55,7 +54,6 @@ python main.py
 在发起 Pull Request 之前运行以下命令：
 
 ```bash
-pytest -q
 python backend/eval/run_eval.py
 ```
 

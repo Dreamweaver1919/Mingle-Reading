@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import sys
@@ -10,11 +10,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backend.common.config import EXAMPLES_DIR, SCHEMAS_DIR
-from backend.common.models import QuestionRequest
-from backend.assets.data.data_processing_scripts.ingest.parser import build_book_record
-from backend.knowledge_base.qa.answering import build_answer
-from backend.llm_memory.summary.chapter_summary import summarize_chapter
+from backend.config import EXAMPLES_DIR, SCHEMAS_DIR
+from backend.api.schemas import QuestionRequest
+from backend.data_pipeline.ingest.parser import build_book_record
+from backend.agents.celebrity.answering import build_answer
+from backend.agents.celebrity.chapter_summary import summarize_chapter
 
 BENCHMARKS_DIR = ROOT / "backend" / "benchmarks"
 
@@ -271,3 +271,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

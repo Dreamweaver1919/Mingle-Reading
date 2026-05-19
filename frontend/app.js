@@ -1,70 +1,105 @@
 ﻿const CHARS_PER_PAGE = 1150;
 const REQUEST_TIMEOUT_MS = 300000;
-const WORKFLOW_TICK_MS = 900;
 
-const PENDING_WORKFLOWS = {
-  idle: {
-    title: "Idle",
-    description: "绛夊緟鐢ㄦ埛鍙戣捣涓婁紶銆侀棶绛旀垨鎬荤粨璇锋眰銆?,
-    steps: [],
+const UPLOAD_STAGE_META = {
+  queued: {
+    title: "Upload queued",
+    description: "The file has been accepted and is waiting for the background pipeline to start.",
   },
-  uploadGraph: {
-    title: "Graphiti Temporal Graph Build",
-    description: "姝ｅ湪鎶婁笂浼犳枃鏈浆鎹㈡垚 Graphiti 椋庢牸鐨勬椂搴忕煡璇嗗浘璋卞熀搴с€?,
-    steps: [
-      { name: "Extract source text", copy: "璇诲彇 TXT / PDF / EPUB锛屽苟鎻愬彇鍚庣画寤哄浘鎵€闇€鐨勬鏂囥€? },
-      { name: "Segment chapters", copy: "鎸夌珷鑺傚拰娈佃惤鍒囧垎鏂囨湰锛屽缓绔嬬ǔ瀹氱殑闃呰杈圭晫銆? },
-      { name: "Construct episodes", copy: "鎶婃钀借浆鎹负 canonical episodes锛屽苟涓茶捣 narrative order銆? },
-      { name: "Resolve entities", copy: "缁撳悎宸叉湁鍥捐妭鐐瑰拰涓婁笅鏂囷紝鍋?LLM-assisted entity resolution銆? },
-      { name: "Resolve facts", copy: "鎶藉彇浜虹墿銆佸湴鐐广€佸叧绯诲拰鐘舵€佷簨瀹烇紝骞跺仛 temporal invalidation銆? },
-      { name: "Build communities", copy: "姹囨€?chapter timeline銆乧ommunity 鍜?saga 缁撴瀯銆? },
-      { name: "Build sagas", copy: "鎶婅法绔犺妭鐨勫彊浜嬩富绾挎暣鐞嗘垚 saga 绾х粨鏋勩€? },
-      { name: "Assemble chapter timeline", copy: "鎶?episode銆乪ntity 鍜?relation 姹囨€绘垚绔犺妭鏃堕棿绾裤€? },
-      { name: "Serialize graph payload", copy: "鎶婂唴瀛樹腑鐨勫浘鑺傜偣銆佽竟鍜屽厓鏁版嵁搴忓垪鍖栦负鍙惤鐩樻牸寮忋€? },
-      { name: "Persist book record", copy: "鍏堝啓鍏?book record锛屽浐瀹氱珷鑺傘€佹钀藉拰闃呰瑙嗗浘鏁版嵁銆? },
-      { name: "Persist graph snapshot", copy: "鍐欏叆 temporal graph 蹇収銆乺elations銆乧ommunities 鍜?sagas銆? },
-      { name: "Finalize graph metadata", copy: "鏀跺熬鍥剧粺璁°€乻torage metadata 鍜屽墠绔彲璇荤储寮曘€? },
-    ],
+  "extract-source-text": {
+    title: "Extracting source text",
+    description: "Reading the uploaded file and extracting plain text from the source document.",
   },
+  "segment-chapters": {
+    title: "Segmenting chapters",
+    description: "Detecting chapter boundaries and preparing paragraph-level source units.",
+  },
+  "construct-episodes": {
+    title: "Constructing episodes",
+    description: "Building constrained extraction packets from adjacent source paragraphs.",
+  },
+  "graph-episode-start": {
+    title: "Processing episode",
+    description: "Preparing the current packet for entity and fact extraction.",
+  },
+  "llm-skipped": {
+    title: "LLM gate skipped this packet",
+    description: "The gate judged this packet low-value, so the graph used the non-LLM path here.",
+  },
+  "llm-request-dispatched": {
+    title: "Waiting for LLM extraction",
+    description: "The packet prompt has been sent to the configured graph extraction model.",
+  },
+  "llm-response-received": {
+    title: "LLM extraction received",
+    description: "The extraction model has returned structured entity and fact candidates.",
+  },
+  "llm-request-failed": {
+    title: "LLM extraction failed",
+    description: "The graph extraction step failed for the current packet.",
+  },
+  "graph-episode-complete": {
+    title: "Episode graph updated",
+    description: "The current packet has been written back into the temporal graph state.",
+  },
+  "chapter-consolidation": {
+    title: "Chapter consolidation",
+    description: "Merging aliases, deduplicating relations, and reconciling chapter-level graph state.",
+  },
+  "graph-community-build": {
+    title: "Building communities",
+    description: "Clustering entities and relations into graph communities.",
+  },
+  "graph-saga-build": {
+    title: "Building sagas",
+    description: "Aggregating chapter-level developments into larger narrative sagas.",
+  },
+  "graph-timeline-build": {
+    title: "Building chapter timeline",
+    description: "Assembling the chapter timeline from visible episodes, entities, and facts.",
+  },
+  "graph-build-finished": {
+    title: "Graph build finished",
+    description: "The graph build is complete and is moving into persistence steps.",
+  },
+  "persist-book-record": {
+    title: "Persisting book record",
+    description: "Saving the parsed book record to local storage.",
+  },
+  "persist-graph-snapshot": {
+    title: "Persisting graph snapshot",
+    description: "Saving the full graph snapshot, including relations, communities, and sagas.",
+  },
+  "finalize-upload": {
+    title: "Finalizing upload",
+    description: "Wrapping up upload metadata and preparing the book for reading.",
+  },
+  completed: {
+    title: "Temporal graph ready",
+    description: "The upload, extraction, and temporal graph construction pipeline has finished.",
+  },
+  failed: {
+    title: "Upload failed",
+    description: "The upload pipeline failed before finishing the document and graph build.",
+  },
+};
+
+const WORKFLOW_META = {
   personaQa: {
-    title: "Persona Answering",
-    description: "姝ｅ湪缁勫悎涔︽湰涓婁笅鏂囥€佸悕瀹?persona RAG 鍜岄槻鍓ч€忕害鏉熴€?,
-    steps: [
-      { name: "Read current scope", copy: "瀹氫綅褰撳墠绔犺妭銆侀珮浜拰鍙涓婁笅鏂囥€? },
-      { name: "Retrieve graph context", copy: "浠?temporal graph 妫€绱㈠綋鍓嶉棶棰樼浉鍏崇殑宸茶浜嬪疄銆? },
-      { name: "Retrieve persona context", copy: "鍙洖鍚嶅璧勬枡鐗囨鍜岄鏍艰瘉鎹€? },
-      { name: "Apply spoiler guard", copy: "鏍规嵁褰撳墠杩涘害杩囨护鏈潵淇℃伅锛屽彧淇濈暀鍙鑼冨洿銆? },
-      { name: "Generate answer", copy: "缁勭粐鎴愬畬鏁村悕瀹跺洖绛斿苟鍐欏洖瀵硅瘽鍖恒€? },
-    ],
+    title: "Literary agent answering",
+    description: "Reading the visible book scope, retrieving graph context, and generating an answer through the literary agent.",
   },
   characterQa: {
-    title: "Character Companion Answering",
-    description: "姝ｅ湪璁╀功涓鑹插湪褰撳墠宸茶杈圭晫鍐呰繘琛岄櫔璇诲洖搴斻€?,
-    steps: [
-      { name: "Read visible scope", copy: "瀹氫綅褰撳墠绔犺妭鍜岀敤鎴烽珮浜搴旂殑鍙鏂囨湰銆? },
-      { name: "Resolve character memory", copy: "妫€绱㈣鑹插湪褰撳墠杩涘害鍓嶅凡缁忓嚭鐜扮殑浜嬩欢鍜屽叧绯汇€? },
-      { name: "Apply spoiler guard", copy: "杩囨护瑙掕壊鏈潵鍛借繍鍜屽悗鏂囨湭鎻ず淇℃伅銆? },
-      { name: "Generate answer", copy: "浠ヨ鑹茶韩浠借緭鍑鸿繛缁櫔璇诲洖绛斻€? },
-    ],
+    title: "Character agent answering",
+    description: "Reading the visible character scope and generating a role-grounded answer.",
   },
   chapterSummary: {
-    title: "Chapter Summary",
-    description: "姝ｅ湪鏍规嵁褰撳墠宸茶鍐呭鐢熸垚闃舵鎬ф€荤粨銆?,
-    steps: [
-      { name: "Collect chapter episodes", copy: "鏀堕泦褰撳墠绔犺妭宸茶娈佃惤鍜岀浉閭昏瘉鎹€? },
-      { name: "Read graph state", copy: "鏁寸悊浜虹墿銆佸叧绯诲拰涓婚鍦ㄦ湰绔犵殑灞€閮ㄦ紨鍖栥€? },
-      { name: "Apply spoiler guard", copy: "闃绘柇鏈潵绔犺妭淇℃伅锛屽彧鎬荤粨褰撳墠鍙鑼冨洿銆? },
-      { name: "Generate summary", copy: "杈撳嚭闃舵鎬荤粨骞跺啓鍏ュ璇濊褰曘€? },
-    ],
+    title: "Chapter summarization",
+    description: "Collecting visible chapter context and generating a grounded chapter summary.",
   },
   characterProfile: {
-    title: "Character Profile Build",
-    description: "姝ｅ湪鏍规嵁褰撳墠宸茶鏂囨湰鐢熸垚瑙掕壊鐢诲儚銆?,
-    steps: [
-      { name: "Find character evidence", copy: "鍦ㄥ綋鍓嶅凡璇昏寖鍥村唴瀹氫綅瑙掕壊鍑虹幇鐨勮瘉鎹钀姐€? },
-      { name: "Assemble relation view", copy: "姹囨€昏瑙掕壊鍙鐨勪汉鐗╁叧绯诲拰寮犲姏銆? },
-      { name: "Generate profile", copy: "鐢熸垚鐢ㄤ簬鍓嶇鍙鍖栫殑瑙掕壊鍗＄墖銆? },
-    ],
+    title: "Building character profile",
+    description: "Gathering evidence, relationships, and current scope notes for the selected character.",
   },
 };
 
@@ -85,15 +120,12 @@ const state = {
   personaConversation: [],
   characterConversation: [],
   inlineBubblesByChunk: {},
-  sessionId: `sess_${Date.now()}`,
-  requestCounter: 0,
   pendingWorkflow: null,
   graphViewVisible: false,
   graphViewScope: "chapter",
   graphViewData: null,
   graphViewLoading: false,
   graphViewError: "",
-  graphSelection: null,
   chapterEnteredAt: Date.now(),
   readingProgress: {
     book_id: "",
@@ -119,358 +151,43 @@ const state = {
   },
 };
 
-let pendingWorkflowTimer = null;
-
 async function fetchJSON(url, options = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  let response;
   try {
-    response = await fetch(url, { ...options, signal: options.signal || controller.signal });
+    const response = await fetch(url, { ...options, signal: options.signal || controller.signal });
+    if (!response.ok) {
+      let detail = `Request failed: ${response.status}`;
+      try {
+        const payload = await response.json();
+        detail = payload.detail || detail;
+      } catch (_error) {
+        // ignore
+      }
+      throw new Error(detail);
+    }
+    return response.json();
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error(`璇锋眰绛夊緟瓒呰繃 ${REQUEST_TIMEOUT_MS / 1000}s銆俙);
+      throw new Error(`Request exceeded ${REQUEST_TIMEOUT_MS / 1000}s.`);
     }
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
   }
-
-  if (!response.ok) {
-    let detail = `Request failed: ${response.status}`;
-    try {
-      const payload = await response.json();
-      detail = payload.detail || detail;
-    } catch (_error) {
-      // ignore
-    }
-    throw new Error(detail);
-  }
-  return response.json();
 }
 
-function clearPendingWorkflowTimer() {
-  if (pendingWorkflowTimer) {
-    window.clearInterval(pendingWorkflowTimer);
-    pendingWorkflowTimer = null;
-  }
+function escapeHtml(text = "") {
+  return String(text)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
-function renderPendingWorkflow() {
-  const indicator = document.getElementById("pending-indicator");
-  const pendingLabel = document.getElementById("pending-label");
-  const pendingTitle = document.getElementById("pending-title");
-  const pendingDescription = document.getElementById("pending-description");
-  const pendingBar = document.getElementById("pending-bar");
-  const pendingPercent = document.getElementById("pending-percent");
-  const pendingStepCaption = document.getElementById("pending-step-caption");
-
-  if (!indicator || !pendingLabel || !pendingTitle || !pendingDescription || !pendingBar || !pendingPercent || !pendingStepCaption) {
-    return;
-  }
-
-  const workflow = state.pendingWorkflow;
-  if (!workflow) {
-    pendingLabel.textContent = "idle";
-    pendingTitle.textContent = "Idle";
-    pendingDescription.textContent = "上传文档后，这里会显示文本抽取、文段构建、LLM 抽取和知识图谱写入的实时进度。";
-    pendingBar.style.width = "0%";
-    pendingPercent.textContent = "0%";
-    pendingStepCaption.textContent = "等待新的处理任务开始。";
-    indicator.classList.remove("is-active", "is-indeterminate");
-    return;
-  }
-
-  indicator.classList.add("is-active");
-  indicator.classList.toggle("is-indeterminate", workflow.indeterminate === true);
-  pendingLabel.textContent = workflow.label || "running";
-  pendingTitle.textContent = workflow.title || "Processing";
-  pendingDescription.textContent = workflow.description || "系统正在处理当前任务。";
-  pendingBar.style.width = workflow.indeterminate ? "32%" : `${workflow.percent || 0}%`;
-  pendingPercent.textContent = `${workflow.percent || 0}%`;
-  pendingStepCaption.textContent = (workflow.currentStep && workflow.currentStep.copy) || "正在等待下一条状态更新。";
-}
-
-function setPendingState(active, label = "idle") {
-  if (!active) {
-    clearPendingWorkflowTimer();
-    state.pendingWorkflow = null;
-    renderPendingWorkflow();
-    return;
-  }
-
-  state.pendingWorkflow = {
-    label,
-    title: "Processing",
-    description: "系统正在启动当前任务。",
-    steps: [],
-    currentIndex: -1,
-    currentStep: { name: "starting", copy: "正在连接处理管线，请稍候。" },
-    percent: 12,
-    indeterminate: true,
-  };
-  renderPendingWorkflow();
-}
-
-function startPendingWorkflow(workflowKey, label = "running") {
-  clearPendingWorkflowTimer();
-  const template = PENDING_WORKFLOWS[workflowKey] || PENDING_WORKFLOWS.idle;
-  const steps = template.steps || [];
-  const totalSteps = steps.length || 1;
-  const basePercent = steps.length ? Math.max(8, Math.round(100 / (totalSteps + 1))) : 18;
-  state.pendingWorkflow = {
-    key: workflowKey,
-    label,
-    title: template.title || "Processing",
-    description: template.description || "系统正在处理当前任务。",
-    steps,
-    currentIndex: 0,
-    currentStep: steps[0] || { name: "running", copy: "正在处理中。" },
-    percent: steps.length ? basePercent : 18,
-    indeterminate: false,
-  };
-  renderPendingWorkflow();
-
-  if (!steps.length) {
-    return;
-  }
-
-  pendingWorkflowTimer = window.setInterval(() => {
-    if (!state.pendingWorkflow || state.pendingWorkflow.key !== workflowKey) {
-      clearPendingWorkflowTimer();
-      return;
-    }
-    const nextIndex = Math.min(state.pendingWorkflow.currentIndex + 1, totalSteps - 1);
-    state.pendingWorkflow.currentIndex = nextIndex;
-    state.pendingWorkflow.currentStep = steps[nextIndex];
-    state.pendingWorkflow.percent = Math.min(92, basePercent + nextIndex * Math.round(84 / totalSteps));
-    renderPendingWorkflow();
-    if (nextIndex >= totalSteps - 1) {
-      clearPendingWorkflowTimer();
-    }
-  }, WORKFLOW_TICK_MS);
-}
-
-function finishPendingWorkflow(label = "done", title = "Completed", description = "任务已完成。") {
-  clearPendingWorkflowTimer();
-  if (!state.pendingWorkflow) {
-    return;
-  }
-  const lastIndex = Math.max(0, (state.pendingWorkflow.steps || []).length - 1);
-  state.pendingWorkflow = {
-    ...state.pendingWorkflow,
-    label,
-    title,
-    description,
-    currentIndex: lastIndex,
-    currentStep: (state.pendingWorkflow.steps || [])[lastIndex] || state.pendingWorkflow.currentStep,
-    percent: 100,
-    indeterminate: false,
-  };
-  renderPendingWorkflow();
-}
-
-function releasePendingState(delayMs = 900) {
-  window.setTimeout(() => {
-    state.pendingWorkflow = null;
-    renderPendingWorkflow();
-  }, delayMs);
-}
-
-const UPLOAD_STAGE_META = {
-  queued: {
-    title: "Upload queued",
-    description: "绛夊緟鍚庣寮€濮嬪鐞嗕笂浼犳枃浠躲€?,
-  },
-  "extract-source-text": {
-    title: "Extracting source text",
-    description: "姝ｅ湪璇诲彇 TXT / PDF / EPUB 骞舵娊鍙栨鏂囥€?,
-  },
-  "segment-chapters": {
-    title: "Segmenting chapters",
-    description: "姝ｅ湪璇嗗埆绔犺妭杈圭晫骞舵暣鐞嗘钀姐€?,
-  },
-  "construct-episodes": {
-    title: "Building constrained packets",
-    description: "姝ｅ湪鎸夌珷鑺傚唴閭绘帴瑙勫垯鍚堝苟娈佃惤锛岀敓鎴愮敤浜庣煡璇嗗浘璋辨娊鍙栫殑 episodes銆?,
-  },
-  "graph-episode-start": {
-    title: "Processing episode",
-    description: "姝ｅ湪澶勭悊褰撳墠鏂囨锛屽噯澶囪繘鍏ュ疄浣撲笌浜嬪疄鎶藉彇銆?,
-  },
-  "llm-skipped": {
-    title: "LLM gate skipped this episode",
-    description: "褰撳墠鏂囨淇″彿杈冨急锛屽凡閫氳繃楂樼簿搴﹂棬鎺ц烦杩囧ぇ妯″瀷璋冪敤銆?,
-  },
-  "llm-request-dispatched": {
-    title: "Waiting for LLM extraction",
-    description: "宸茬粡鍚戞ā鍨嬫彁浜?entity / fact extraction prompt锛屾鍦ㄧ瓑寰呯粨鏋勫寲 JSON 杩斿洖銆?,
-  },
-  "llm-response-received": {
-    title: "LLM extraction received",
-    description: "宸叉敹鍒扮粨鏋勫寲瀹炰綋涓庝簨瀹炲€欓€夛紝姝ｅ湪鍐欏洖褰撳墠鏂囨鍥捐氨銆?,
-  },
-  "llm-request-failed": {
-    title: "LLM extraction failed",
-    description: "褰撳墠鏂囨鐨勫ぇ妯″瀷鎶藉彇澶辫触锛岃妫€鏌ヤ笂娓告ā鍨嬫湇鍔℃垨 JSON 杈撳嚭銆?,
-  },
-  "graph-episode-complete": {
-    title: "Episode graph updated",
-    description: "褰撳墠鏂囨鐨勫疄浣撱€佸叧绯诲拰鏃跺簭鐘舵€佸凡缁忓啓鍏ュ浘璋卞唴瀛樸€?,
-  },
-  "chapter-consolidation": {
-    title: "Chapter consolidation",
-    description: "姝ｅ湪鍋氱珷鑺傜骇鍒悕褰掑苟銆佸叧绯诲幓閲嶄笌鐘舵€佸啿绐佹秷瑙ｃ€?,
-  },
-  "graph-community-build": {
-    title: "Building communities",
-    description: "姝ｅ湪浠庣珷鑺備笌瀹炰綋鍏崇郴涓敓鎴?community 鑱氬悎灞傘€?,
-  },
-  "graph-saga-build": {
-    title: "Building sagas",
-    description: "姝ｅ湪鐢熸垚璺ㄧ珷鑺傜殑 saga 鍙欎簨鑱氬悎灞傘€?,
-  },
-  "graph-timeline-build": {
-    title: "Building chapter timeline",
-    description: "姝ｅ湪瑁呴厤 chapter timeline 涓?active / invalidated facts 瑙嗗浘銆?,
-  },
-  "graph-build-finished": {
-    title: "Graph build finished",
-    description: "鍥捐氨鍐呭瓨鏋勫缓瀹屾垚锛屽噯澶囧啓鍏ユ寔涔呭寲瀛樺偍銆?,
-  },
-  "persist-book-record": {
-    title: "Persisting book record",
-    description: "姝ｅ湪淇濆瓨瑙ｆ瀽鍚庣殑涔︾睄缁撴瀯涓?episode 璁板綍銆?,
-  },
-  "persist-graph-snapshot": {
-    title: "Persisting graph snapshot",
-    description: "姝ｅ湪淇濆瓨 temporal graph snapshot銆乺elations銆乧ommunities 涓?sagas銆?,
-  },
-  "finalize-upload": {
-    title: "Finalizing upload",
-    description: "姝ｅ湪鍐欏叆鏈€缁堝厓鏁版嵁骞剁粨鏉熸湰娆℃瀯鍥句换鍔°€?,
-  },
-  completed: {
-    title: "Temporal graph ready",
-    description: "涓婁紶銆佸垏鍒嗕笌鐭ヨ瘑鍥捐氨鏋勫缓宸插畬鎴愩€?,
-  },
-  failed: {
-    title: "Upload failed",
-    description: "涓婁紶浠诲姟澶辫触锛岃鏌ョ湅褰撳墠闃舵鍜岄敊璇鎯呫€?,
-  },
-};
-
-function formatSourceParagraphSummary(details = {}) {
-  const sourceCount = Number(details.source_paragraph_count || 0);
-  const sourceIndices = Array.isArray(details.source_paragraph_indices) ? details.source_paragraph_indices : [];
-  const packetTokens = Number(details.packet_token_count || 0);
-  if (!sourceCount && !packetTokens) {
-    return "";
-  }
-  const rangeLabel =
-    sourceIndices.length > 1
-      ? `${sourceIndices[0]}-${sourceIndices[sourceIndices.length - 1]}`
-      : sourceIndices.length === 1
-      ? String(sourceIndices[0])
-      : "-";
-  const mergedLabel = details.is_merged_packet ? "merged packet" : "single paragraph";
-  const tokenLabel = packetTokens ? `, ${packetTokens} chars` : "";
-  return `婧愭枃娈?${rangeLabel}锛?{sourceCount || 1} 娈碉紝${mergedLabel}${tokenLabel}锛塦;
-}
-
-function formatGateSummary(details = {}) {
-  if (!details || typeof details !== "object") {
-    return "";
-  }
-  const reasons = Array.isArray(details.reasons) ? details.reasons.filter(Boolean) : [];
-  const score = typeof details.score === "number" ? details.score : null;
-  const threshold = typeof details.threshold === "number" ? details.threshold : null;
-  if (score === null && !reasons.length) {
-    return "";
-  }
-  const scoreLabel = score !== null && threshold !== null ? `gate ${score}/${threshold}` : "gate";
-  const reasonLabel = reasons.length ? `锛?{reasons.join(", ")}` : "";
-  return `${scoreLabel}${reasonLabel}`;
-}
-
-function formatUploadStageCopy(job) {
-  const processed = Number(job.processed_snippets || 0);
-  const total = Number(job.total_snippets || 0);
-  const details = job.details || {};
-  const currentSnippet = job.current_snippet_id
-    ? `褰撳墠鏂囨 ${job.current_snippet_id}锛坈hapter ${job.current_chapter_index || "-"} / paragraph ${job.current_paragraph_index || "-"}锛塦
-    : "";
-  const processedLabel = total ? `宸插鐞嗘枃娈?${processed}/${total}` : "";
-  const packetSummary = formatSourceParagraphSummary(details);
-  const gateSummary = formatGateSummary(details);
-  const llmDispatch =
-    job.stage === "llm-request-dispatched"
-      ? `LLM provider: ${details.provider || "configured runtime"}锛宲rompt 宸蹭氦浠橈紝绛夊緟杩斿洖`
-      : "";
-  const llmResponse =
-    job.stage === "llm-response-received"
-      ? `LLM 杩斿洖 ${details.entity_candidates || 0} 涓疄浣撳€欓€夛紝${details.fact_candidates || 0} 鏉′簨瀹炲€欓€塦
-      : "";
-  const llmFailure = job.stage === "llm-request-failed" && details.error ? `閿欒锛?{details.error}` : "";
-  const consolidation =
-    job.stage === "chapter-consolidation"
-      ? `绔犺妭鏁?${details.chapter_count || "-"}锛屽綋鍓嶅浘涓疄浣?${details.active_entity_count || 0}锛屽叧绯?${details.active_relation_count || 0}`
-      : "";
-  const persistence =
-    job.stage === "persist-graph-snapshot"
-      ? `瀹炰綋 ${details.entity_count || 0}锛屽叧绯?${details.relation_count || 0}锛宑ommunity ${details.community_count || 0}锛宻aga ${details.saga_count || 0}`
-      : "";
-
-  return [
-    processedLabel,
-    currentSnippet,
-    packetSummary,
-    gateSummary,
-    llmDispatch,
-    llmResponse,
-    llmFailure,
-    consolidation,
-    persistence,
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
-function applyUploadJobState(job) {
-  const stage = job.stage || job.status || "queued";
-  const stageMeta = UPLOAD_STAGE_META[stage] || {
-    title: job.title || "Temporal graph build",
-    description: job.message || "",
-  };
-  state.pendingWorkflow = {
-    key: "uploadGraph",
-    label: stage,
-    title: job.title || stageMeta.title,
-    description: job.message || stageMeta.description,
-    percent: job.percent || 0,
-    indeterminate: false,
-    currentIndex: 0,
-    currentStep: {
-      name: stage,
-      copy: formatUploadStageCopy(job),
-    },
-    steps: [],
-  };
-  renderPendingWorkflow();
-}
-
-async function waitForUploadJob(jobId) {
-  while (true) {
-    const job = await fetchJSON(`/api/upload-jobs/${jobId}`);
-    applyUploadJobState(job);
-    if (job.status === "completed") {
-      return job;
-    }
-    if (job.status === "failed") {
-      throw new Error(job.error || job.message || "upload job failed");
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 700));
-  }
+function previewText(text, fallback = "Nothing is selected yet.") {
+  return text && text.trim() ? text.trim() : fallback;
 }
 
 function setButtonLoading(buttonId, isLoading, loadingText = "") {
@@ -485,24 +202,19 @@ function setButtonLoading(buttonId, isLoading, loadingText = "") {
   button.textContent = isLoading ? loadingText : button.dataset.defaultText;
 }
 
-function nextRequestId(prefix) {
-  state.requestCounter += 1;
-  return `${prefix}_${state.requestCounter}`;
-}
-
 function getPersonaById(personaId) {
   return state.personas.find((persona) => persona.persona_id === personaId) || state.personas[0] || null;
-}
-
-function previewText(text, fallback = "杩樻病鏈夐€変腑鐨勬枃鏈?) {
-  return text && text.trim() ? text.trim() : fallback;
 }
 
 function getCurrentPassages() {
   if (!state.activeBookDetail) {
     return [];
   }
-  return state.activeBookDetail.chapters[String(state.activeChapter)] || state.activeBookDetail.chapters[state.activeChapter] || [];
+  return (
+    state.activeBookDetail.chapters[String(state.activeChapter)] ||
+    state.activeBookDetail.chapters[state.activeChapter] ||
+    []
+  );
 }
 
 function getFirstReadableChapter() {
@@ -524,21 +236,24 @@ function getCurrentPages() {
     return [];
   }
   const pages = [];
-  let current = [];
-  let size = 0;
+  let currentPage = [];
+  let currentSize = 0;
+
   passages.forEach((passage, index) => {
-    const nextSize = (passage.text || "").length + 80;
-    if (current.length && size + nextSize > CHARS_PER_PAGE) {
-      pages.push(current);
-      current = [];
-      size = 0;
+    const estimatedSize = (passage.text || "").length + 80;
+    if (currentPage.length && currentSize + estimatedSize > CHARS_PER_PAGE) {
+      pages.push(currentPage);
+      currentPage = [];
+      currentSize = 0;
     }
-    current.push({ ...passage, _index: index });
-    size += nextSize;
+    currentPage.push({ ...passage, _index: index });
+    currentSize += estimatedSize;
   });
-  if (current.length) {
-    pages.push(current);
+
+  if (currentPage.length) {
+    pages.push(currentPage);
   }
+
   return pages;
 }
 
@@ -560,6 +275,188 @@ function pushConversation(role, content) {
   target.push({ role, content });
 }
 
+function renderPendingWorkflow() {
+  const indicator = document.getElementById("pending-indicator");
+  const title = document.getElementById("pending-title");
+  const label = document.getElementById("pending-label");
+  const description = document.getElementById("pending-description");
+  const bar = document.getElementById("pending-bar");
+  const percent = document.getElementById("pending-percent");
+  const caption = document.getElementById("pending-step-caption");
+
+  if (!indicator || !title || !label || !description || !bar || !percent || !caption) {
+    return;
+  }
+
+  if (!state.pendingWorkflow) {
+    indicator.classList.remove("is-active", "is-indeterminate");
+    title.textContent = "Idle";
+    label.textContent = "idle";
+    description.textContent =
+      "After a document is uploaded, this panel will display real-time text extraction, packet construction, LLM extraction, and graph persistence progress.";
+    bar.style.width = "0%";
+    percent.textContent = "0%";
+    caption.textContent = "Waiting for the next job to start.";
+    return;
+  }
+
+  indicator.classList.add("is-active");
+  indicator.classList.toggle("is-indeterminate", state.pendingWorkflow.indeterminate === true);
+  title.textContent = state.pendingWorkflow.title;
+  label.textContent = state.pendingWorkflow.label;
+  description.textContent = state.pendingWorkflow.description;
+  bar.style.width = state.pendingWorkflow.indeterminate ? "32%" : `${state.pendingWorkflow.percent}%`;
+  percent.textContent = `${state.pendingWorkflow.percent}%`;
+  caption.textContent = state.pendingWorkflow.caption || "Waiting for the next update.";
+}
+
+function setPendingState(active, label = "running", title = "Processing", description = "The task is starting.") {
+  if (!active) {
+    state.pendingWorkflow = null;
+    renderPendingWorkflow();
+    return;
+  }
+  state.pendingWorkflow = {
+    label,
+    title,
+    description,
+    percent: 12,
+    caption: "Preparing the task pipeline.",
+    indeterminate: true,
+  };
+  renderPendingWorkflow();
+}
+
+function startPendingWorkflow(key, label = "running") {
+  const meta = WORKFLOW_META[key] || {
+    title: "Processing",
+    description: "The task is currently running.",
+  };
+  state.pendingWorkflow = {
+    key,
+    label,
+    title: meta.title,
+    description: meta.description,
+    percent: 18,
+    caption: "Task started.",
+    indeterminate: true,
+  };
+  renderPendingWorkflow();
+}
+
+function finishPendingWorkflow(label = "done", title = "Completed", description = "The task finished successfully.") {
+  if (!state.pendingWorkflow) {
+    return;
+  }
+  state.pendingWorkflow = {
+    ...state.pendingWorkflow,
+    label,
+    title,
+    description,
+    percent: 100,
+    caption: description,
+    indeterminate: false,
+  };
+  renderPendingWorkflow();
+}
+
+function releasePendingState(delayMs = 900) {
+  window.setTimeout(() => {
+    state.pendingWorkflow = null;
+    renderPendingWorkflow();
+  }, delayMs);
+}
+
+function formatUploadStageCopy(job) {
+  const lines = [];
+  const processed = Number(job.processed_snippets || 0);
+  const total = Number(job.total_snippets || 0);
+  const details = job.details || {};
+
+  if (total) {
+    lines.push(`Processed snippets: ${processed}/${total}`);
+  }
+  if (job.current_snippet_id) {
+    lines.push(
+      `Current snippet: ${job.current_snippet_id} (chapter ${job.current_chapter_index || "-"}, paragraph ${
+        job.current_paragraph_index || "-"
+      })`
+    );
+  }
+  if (details.source_paragraph_count) {
+    const indices = Array.isArray(details.source_paragraph_indices) ? details.source_paragraph_indices : [];
+    const span =
+      indices.length > 1
+        ? `${indices[0]}-${indices[indices.length - 1]}`
+        : indices.length === 1
+          ? `${indices[0]}`
+          : "-";
+    lines.push(
+      `Packet: paragraphs ${span}, count ${details.source_paragraph_count}, ${
+        details.is_merged_packet ? "merged" : "single"
+      }, ${details.packet_token_count || 0} chars`
+    );
+  }
+  if (typeof details.score === "number") {
+    const reasons = Array.isArray(details.reasons) ? details.reasons.join(", ") : "";
+    lines.push(`Gate score: ${details.score}/${details.threshold ?? "-"}${reasons ? ` (${reasons})` : ""}`);
+  }
+  if (job.stage === "llm-request-dispatched") {
+    lines.push(`LLM call dispatched. Provider: ${details.provider || "configured runtime"}`);
+  }
+  if (job.stage === "llm-response-received") {
+    lines.push(`LLM returned ${details.entity_candidates || 0} entity candidates and ${details.fact_candidates || 0} fact candidates.`);
+  }
+  if (job.stage === "llm-request-failed" && details.error) {
+    lines.push(`LLM error: ${details.error}`);
+  }
+  if (job.stage === "chapter-consolidation") {
+    lines.push(
+      `Chapter consolidation: entities ${details.active_entity_count || 0}, relations ${details.active_relation_count || 0}`
+    );
+  }
+  if (job.stage === "persist-graph-snapshot") {
+    lines.push(
+      `Graph snapshot: entities ${details.entity_count || 0}, relations ${details.relation_count || 0}, communities ${
+        details.community_count || 0
+      }, sagas ${details.saga_count || 0}`
+    );
+  }
+  return lines.join(" | ");
+}
+
+function applyUploadJobState(job) {
+  const stage = job.stage || job.status || "queued";
+  const meta = UPLOAD_STAGE_META[stage] || {
+    title: job.title || "Temporal graph build",
+    description: job.message || "The upload pipeline is running.",
+  };
+  state.pendingWorkflow = {
+    key: "upload",
+    label: stage,
+    title: job.title || meta.title,
+    description: job.message || meta.description,
+    percent: Number(job.percent || 0),
+    caption: formatUploadStageCopy(job) || meta.description,
+    indeterminate: false,
+  };
+  renderPendingWorkflow();
+}
+
+async function waitForUploadJob(jobId) {
+  while (true) {
+    const job = await fetchJSON(`/api/upload-jobs/${jobId}`);
+    applyUploadJobState(job);
+    if (job.status === "completed") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error || job.message || "Upload job failed.");
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+  }
+}
+
 function resetSelection() {
   state.selectionContext = {
     book_id: state.activeBook || "",
@@ -575,7 +472,7 @@ function resetSelection() {
   };
 }
 
-function updateProgressFromSelection(passage) {
+function updateProgressFromPassage(passage) {
   const pages = getCurrentPages();
   const scrollOffset = pages.length ? Number(((state.activePageIndex + 1) / pages.length).toFixed(2)) : 0;
   state.readingProgress = {
@@ -583,7 +480,7 @@ function updateProgressFromSelection(passage) {
     chapter_id: state.activeChapter,
     section_id: `sec-${state.activeChapter}`,
     paragraph_id: String(passage.paragraph_index ?? ""),
-    token_offset: passage.text ? passage.text.length : 0,
+    token_offset: (passage.text || "").length,
     scroll_offset: scrollOffset,
     dwell_seconds: Math.max(1, Math.floor((Date.now() - state.chapterEnteredAt) / 1000)),
     updated_at: new Date().toISOString(),
@@ -591,14 +488,14 @@ function updateProgressFromSelection(passage) {
 }
 
 function buildSelectionFromPassage(passage, index, passages) {
-  const prev = passages[index - 1];
+  const previous = passages[index - 1];
   const next = passages[index + 1];
   state.selectionContext = {
     book_id: state.activeBook || "",
     selection_id: `sel_${passage.chunk_id || index + 1}`,
-    selected_text: passage.text,
-    left_context: prev ? prev.text : "",
-    right_context: next ? next.text : "",
+    selected_text: passage.text || "",
+    left_context: previous ? previous.text || "" : "",
+    right_context: next ? next.text || "" : "",
     anchor: {
       chapter_id: state.activeChapter,
       section_id: `sec-${state.activeChapter}`,
@@ -614,10 +511,10 @@ function renderPersonaDetails() {
   }
   document.getElementById("persona-type-badge").textContent = persona.source_type;
   document.getElementById("persona-name").textContent = persona.name;
-  document.getElementById("persona-citation").textContent = persona.citation;
+  document.getElementById("persona-citation").textContent = persona.citation || "";
   const traits = document.getElementById("persona-traits");
   traits.innerHTML = "";
-  [...persona.style_traits, ...persona.reasoning_style].slice(0, 6).forEach((item) => {
+  [...(persona.style_traits || []), ...(persona.reasoning_style || [])].slice(0, 6).forEach((item) => {
     const pill = document.createElement("span");
     pill.className = "pill";
     pill.textContent = item;
@@ -628,15 +525,15 @@ function renderPersonaDetails() {
 function renderCharacterCandidates() {
   const select = document.getElementById("character-select");
   select.innerHTML = "";
-  const emptyOption = document.createElement("option");
-  emptyOption.value = "";
-  emptyOption.textContent = state.characterCandidates.length ? "璇烽€夋嫨瑙掕壊鍊欓€? : "鏆傛棤瑙掕壊鍊欓€?;
-  select.appendChild(emptyOption);
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = state.characterCandidates.length ? "Choose a character candidate" : "No character candidates available";
+  select.appendChild(empty);
 
   state.characterCandidates.forEach((candidate) => {
     const option = document.createElement("option");
     option.value = candidate.character_name;
-    option.textContent = `${candidate.character_name} 路 ${candidate.mention_count} 娆;
+    option.textContent = `${candidate.character_name} 路 ${candidate.mention_count}`;
     select.appendChild(option);
   });
 
@@ -647,54 +544,45 @@ function renderCharacterCandidates() {
 
 function renderCharacterProfile() {
   const container = document.getElementById("character-profile-card");
-  container.innerHTML = "";
+  if (!container) {
+    return;
+  }
   if (!state.activeCharacterProfile) {
-    container.innerHTML = '<p class="muted">鐢熸垚瑙掕壊鐢诲儚鍚庯紝杩欓噷浼氬睍绀哄綋鍓嶅凡璇昏寖鍥村唴鐨勮鑹叉憳瑕併€佸紶鍔涘拰鍏崇郴銆?/p>';
+    container.innerHTML = `<p class="muted">Choose a candidate or enter a character name to build a character profile.</p>`;
     return;
   }
 
   const profile = state.activeCharacterProfile;
-  const traitRow = document.createElement("div");
-  traitRow.className = "pill-row";
-  (profile.core_traits || []).forEach((trait) => {
-    const pill = document.createElement("span");
-    pill.className = "pill";
-    pill.textContent = trait;
-    traitRow.appendChild(pill);
-  });
-
-  const relationList = document.createElement("ul");
-  relationList.className = "plain-list relationship-list";
-  (profile.relationships || []).forEach((relation) => {
-    const li = document.createElement("li");
-    li.textContent = `${relation.target}锛?{relation.description}`;
-    relationList.appendChild(li);
-  });
+  const traits = (profile.core_traits || [])
+    .map((trait) => `<span class="pill">${escapeHtml(trait)}</span>`)
+    .join("");
+  const relationships = (profile.relationships || [])
+    .map((relation) => `<li>${escapeHtml(relation.target)} - ${escapeHtml(relation.description)}</li>`)
+    .join("");
 
   container.innerHTML = `
-    <h4 class="character-name">${profile.character_name}</h4>
-    <p class="muted">${profile.summary}</p>
-    <p class="label">鏍稿績寮犲姏</p>
-    <p class="signature-tension">${profile.signature_tension || "褰撳墠宸茶鑼冨洿鍐呰繕娌℃湁瓒冲鐨勮鑹插啿绐佹弿杩般€?}</p>
-    <p class="label">褰撳墠鍙鑼冨洿</p>
-    <p class="muted">${profile.current_scope}</p>
-    <p class="label">妯″瀷</p>
-    <p class="muted">${profile.model_name}</p>
+    <h4 class="character-name">${escapeHtml(profile.character_name)}</h4>
+    <p class="muted">${escapeHtml(profile.summary || "")}</p>
+    <div class="pill-row">${traits}</div>
+    <p class="label">Current visible scope</p>
+    <p class="muted">${escapeHtml(profile.current_scope || "No visible scope note available.")}</p>
+    <p class="label">Signature tension</p>
+    <p class="signature-tension">${escapeHtml(profile.signature_tension || "No signature tension note available.")}</p>
+    <p class="label">Model</p>
+    <p class="muted">${escapeHtml(profile.model_name || "")}</p>
+    ${
+      relationships
+        ? `<p class="label">Relationships</p><ul class="plain-list relationship-list">${relationships}</ul>`
+        : ""
+    }
   `;
-  container.appendChild(traitRow);
-  if (relationList.children.length) {
-    const heading = document.createElement("p");
-    heading.className = "label";
-    heading.textContent = "浜虹墿鍏崇郴";
-    container.appendChild(heading);
-    container.appendChild(relationList);
-  }
 }
 
 function renderBooks() {
   const list = document.getElementById("book-list");
   list.innerHTML = "";
-  document.getElementById("book-count").textContent = `${state.books.length} 鏈琡;
+  document.getElementById("book-count").textContent = `${state.books.length} books`;
+
   state.books.forEach((book) => {
     const item = document.createElement("li");
     item.className = "book-item";
@@ -702,8 +590,8 @@ function renderBooks() {
     button.type = "button";
     button.className = `book-button ${state.activeBook === book.book_id ? "is-active" : ""}`;
     button.innerHTML = `
-      <span class="book-title">${book.title}</span>
-      <span class="book-meta">${book.book_id}</span>
+      <span class="book-title">${escapeHtml(book.title)}</span>
+      <span class="book-meta">${escapeHtml(book.book_id)}</span>
     `;
     button.addEventListener("click", () => openBook(book.book_id));
     item.appendChild(button);
@@ -713,40 +601,45 @@ function renderBooks() {
 
 function renderReaderHeader() {
   if (!state.activeBookDetail) {
-    document.getElementById("book-title").textContent = "閫夋嫨涓€鏈功寮€濮嬮槄璇?;
-    document.getElementById("book-subtitle").textContent = "涓婁紶鏂囨湰鍚庯紝绯荤粺浼氬垏鍒嗙珷鑺傘€佸缓绔嬮槄璇昏繘搴﹀苟鑷姩鏋勫缓 temporal knowledge graph銆?;
-    document.getElementById("progress-text").textContent = "褰撳墠杩樻病鏈夋縺娲荤殑闃呰杩涘害銆?;
+    document.getElementById("book-title").textContent = "Choose a book to begin";
+    document.getElementById("book-subtitle").textContent =
+      "Upload a document to inspect chapters, reading progress, and the temporal knowledge graph.";
+    document.getElementById("progress-text").textContent = "No reading progress is available yet.";
     document.getElementById("hero-chapter").textContent = "-";
     document.getElementById("hero-paragraph").textContent = "-";
     document.getElementById("hero-dwell").textContent = "0s";
     return;
   }
+
   const pages = getCurrentPages();
   document.getElementById("book-title").textContent = state.activeBookDetail.title;
-  document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id}锛屽叡 ${state.activeBookDetail.chapter_count} 绔犮€俙;
-  document.getElementById("progress-text").textContent =
-    `褰撳墠浣嶄簬绗?${state.readingProgress.chapter_id} 绔?/ 绗?${state.activePageIndex + 1} 椤?/ 娈佃惤 ${state.readingProgress.paragraph_id || "-"}锛屾湰绔犲叡 ${pages.length || 0} 椤点€俙;
-  document.getElementById("hero-chapter").textContent = `绗?${state.activeChapter} 绔燻;
-  document.getElementById("hero-paragraph").textContent = state.activeParagraphIndex === null ? "-" : `P${state.activeParagraphIndex}`;
+  document.getElementById("book-subtitle").textContent = `book_id: ${state.activeBookDetail.book_id} 路 ${state.activeBookDetail.chapter_count} chapters`;
+  document.getElementById("progress-text").textContent = `Current position: chapter ${state.readingProgress.chapter_id}, page ${state.activePageIndex + 1}/${pages.length || 0}, paragraph ${state.readingProgress.paragraph_id || "-"}`;
+  document.getElementById("hero-chapter").textContent = `Chapter ${state.activeChapter}`;
+  document.getElementById("hero-paragraph").textContent =
+    state.activeParagraphIndex === null ? "-" : `P${state.activeParagraphIndex}`;
   document.getElementById("hero-dwell").textContent = `${state.readingProgress.dwell_seconds || 0}s`;
 }
 
 function renderChapterNav() {
   const container = document.getElementById("chapter-nav");
   container.innerHTML = "";
+
   if (!state.activeBookDetail) {
-    container.innerHTML = '<p class="muted">涓婁紶鎴栭€夋嫨涓€鏈功鍚庯紝杩欓噷浼氭樉绀虹珷鑺傜洰褰曘€?/p>';
+    container.innerHTML = `<p class="muted">No chapter outline is available until a book is opened.</p>`;
     return;
   }
+
   for (let chapter = 1; chapter <= state.activeBookDetail.chapter_count; chapter += 1) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `chapter-button ${chapter === state.activeChapter ? "is-active" : ""}`;
-    button.textContent = `绗?${chapter} 绔燻;
+    button.textContent = `Chapter ${chapter}`;
     button.addEventListener("click", () => setActiveChapter(chapter));
     container.appendChild(button);
   }
-  document.getElementById("toc-progress").textContent = `宸茶鑷崇 ${state.activeChapter} 绔燻;
+
+  document.getElementById("toc-progress").textContent = `Reading chapter ${state.activeChapter}`;
 }
 
 function renderChapterSelects() {
@@ -754,24 +647,27 @@ function renderChapterSelects() {
   const paragraphSelect = document.getElementById("paragraph-jump");
   chapterSelect.innerHTML = "";
   paragraphSelect.innerHTML = "";
+
   if (!state.activeBookDetail) {
     return;
   }
+
   for (let chapter = 1; chapter <= state.activeBookDetail.chapter_count; chapter += 1) {
     const option = document.createElement("option");
     option.value = String(chapter);
-    option.textContent = `绗?${chapter} 绔燻;
+    option.textContent = `Chapter ${chapter}`;
     chapterSelect.appendChild(option);
   }
   chapterSelect.value = String(state.activeChapter);
 
   getCurrentPassages().forEach((passage, index) => {
-    const option = document.createElement("option");
     const paragraphIndex = passage.paragraph_index ?? index + 1;
+    const option = document.createElement("option");
     option.value = String(paragraphIndex);
-    option.textContent = `娈佃惤 ${paragraphIndex}`;
+    option.textContent = `Paragraph ${paragraphIndex}`;
     paragraphSelect.appendChild(option);
   });
+
   if (state.activeParagraphIndex !== null) {
     paragraphSelect.value = String(state.activeParagraphIndex);
   }
@@ -780,22 +676,31 @@ function renderChapterSelects() {
 function renderSelectionPreview() {
   document.getElementById("highlight-preview").textContent = previewText(
     state.selectionContext.selected_text,
-    "鐐瑰嚮姝ｆ枃涓殑浠绘剰娈佃惤锛岃繖閲屼細鏄剧ず褰撳墠閫変腑鐨勬枃鏈€?
+    "Click a paragraph to preview the selected text and nearby context here."
   );
 }
 
 function renderAssistantStatus() {
   const node = document.getElementById("assistant-status");
+  if (!node) {
+    return;
+  }
   if (state.assistantMode === "persona") {
     const persona = getPersonaById(state.personaId);
-    node.textContent = persona ? `褰撳墠鐢?${persona.name} 璐熻矗鍚嶅瀵艰銆俙 : "褰撳墠鐢卞悕瀹跺璇绘ā寮忓洖绛斻€?;
-  } else if (state.activeCharacterProfile) {
-    node.textContent = `褰撳墠鐢辫鑹?${state.activeCharacterProfile.character_name} 璐熻矗闄銆俙;
-  } else if (state.activeCharacterName) {
-    node.textContent = `褰撳墠鍑嗗鐢熸垚瑙掕壊 ${state.activeCharacterName} 鐨勯櫔璇荤敾鍍忋€俙;
-  } else {
-    node.textContent = "鍏堥€夋嫨鎴栫敓鎴愪竴涓鑹茬敾鍍忥紝鍐嶅垏鍒拌鑹查櫔璇绘ā寮忋€?;
+    node.textContent = persona
+      ? `Current mode: literary agent 路 ${persona.name}`
+      : "Current mode: literary agent";
+    return;
   }
+  if (state.activeCharacterProfile) {
+    node.textContent = `Current mode: character agent 路 ${state.activeCharacterProfile.character_name}`;
+    return;
+  }
+  if (state.activeCharacterName) {
+    node.textContent = `Current mode: character agent 路 ${state.activeCharacterName}`;
+    return;
+  }
+  node.textContent = "Current mode: character agent. Choose or enter a character name to continue.";
 }
 
 function renderAssistantMode() {
@@ -809,25 +714,29 @@ function renderChatHistory() {
   const historyNode = document.getElementById("chat-history");
   historyNode.innerHTML = "";
   const conversation = currentConversation();
+
   if (!conversation.length) {
-    historyNode.innerHTML = '<p class="muted">杩欓噷浼氳繛缁樉绀哄悕瀹跺璇绘垨瑙掕壊闄鐨勫璇濊褰曘€?/p>';
+    historyNode.innerHTML = `<p class="muted">No conversation yet. Ask a question to the current agent.</p>`;
     return;
   }
+
   conversation.forEach((turn) => {
-    const item = document.createElement("article");
-    item.className = `chat-message chat-message-${turn.role}`;
-    const role =
+    const article = document.createElement("article");
+    article.className = `chat-message chat-message-${turn.role}`;
+    const roleLabel =
       turn.role === "user"
         ? "User"
         : state.assistantMode === "persona"
-          ? getPersonaById(state.personaId)?.name || "Persona Agent"
+          ? getPersonaById(state.personaId)?.name || "Literary Agent"
           : state.activeCharacterProfile?.character_name || state.activeCharacterName || "Character Agent";
-    item.innerHTML = `
-      <div class="chat-role">${role}</div>
-      <div class="chat-content">${turn.content.replace(/\n/g, "<br />")}</div>
+
+    article.innerHTML = `
+      <div class="chat-role">${escapeHtml(roleLabel)}</div>
+      <div class="chat-content">${escapeHtml(turn.content || "").replace(/\n/g, "<br />")}</div>
     `;
-    historyNode.appendChild(item);
+    historyNode.appendChild(article);
   });
+
   historyNode.scrollTop = historyNode.scrollHeight;
 }
 
@@ -840,19 +749,10 @@ function updatePageIndicator() {
   document.getElementById("next-page-btn").disabled = total === 0 || current >= total;
 }
 
-function escapeHtml(text) {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function graphNodeColor(type) {
   if (type === "character") return "#1f6a73";
-  if (type === "theme" || type === "concept") return "#8f5a3c";
   if (type === "location") return "#546c44";
+  if (type === "theme" || type === "concept") return "#8f5a3c";
   return "#7b6d59";
 }
 
@@ -865,15 +765,11 @@ function renderGraphPanel() {
   const toggleButton = document.getElementById("graph-toggle-btn");
   const chapterScopeButton = document.getElementById("graph-scope-chapter-btn");
   const bookScopeButton = document.getElementById("graph-scope-book-btn");
-  if (!panel || !canvas || !detail || !badge || !caption || !toggleButton || !chapterScopeButton || !bookScopeButton) {
-    return;
-  }
 
   chapterScopeButton.classList.toggle("is-active", state.graphViewScope === "chapter");
   bookScopeButton.classList.toggle("is-active", state.graphViewScope === "book");
-
   panel.classList.toggle("is-hidden", !state.graphViewVisible);
-  toggleButton.textContent = state.graphViewVisible ? "闅愯棌鐭ヨ瘑鍥捐氨" : "鏄剧ず鐭ヨ瘑鍥捐氨";
+  toggleButton.textContent = state.graphViewVisible ? "Hide Knowledge Graph" : "Show Knowledge Graph";
 
   if (!state.graphViewVisible) {
     return;
@@ -881,33 +777,35 @@ function renderGraphPanel() {
 
   if (state.graphViewLoading) {
     badge.textContent = "loading";
-    canvas.innerHTML = '<p class="muted">姝ｅ湪璇诲彇褰撳墠绔犺妭鐨勭煡璇嗗浘璋?..</p>';
-    detail.textContent = "鍥捐氨鍔犺浇瀹屾垚鍚庯紝杩欓噷浼氭樉绀鸿妭鐐规垨杈圭殑鎽樿銆?;
+    canvas.innerHTML = `<p class="muted">Loading graph view...</p>`;
+    detail.textContent = "The graph panel is waiting for the backend to return visible nodes and relations.";
     return;
   }
 
   if (state.graphViewError) {
     badge.textContent = "error";
-    canvas.innerHTML = `<p class="muted">鐭ヨ瘑鍥捐氨璇诲彇澶辫触锛?{escapeHtml(state.graphViewError)}</p>`;
-    detail.textContent = "璇风◢鍚庨噸璇曪紝鎴栧厛纭褰撳墠涔﹀凡缁忔垚鍔熷畬鎴愮煡璇嗗浘璋辨瀯寤恒€?;
+    canvas.innerHTML = `<p class="muted">${escapeHtml(state.graphViewError)}</p>`;
+    detail.textContent = "The graph request failed. Please refresh the graph or verify that the current book has finished graph construction.";
     return;
   }
 
   const data = state.graphViewData;
-  const scopeLabel = state.graphViewScope === "book" ? "全书总图" : "当前章节图";
+  const scopeLabel = state.graphViewScope === "book" ? "whole-book graph" : "current chapter graph";
   if (!data || !Array.isArray(data.nodes) || !data.nodes.length) {
     badge.textContent = "0 nodes";
-    canvas.innerHTML = `<p class="muted">${scopeLabel}当前还没有足够清晰的图谱节点可显示。</p>`;
-    detail.textContent = state.graphViewScope === "book"
-      ? "这本书已经完成建图，但在当前可见进度内还没有稳定到足以展示的节点和关系。"
-      : "当前章节图为空时，可以直接切到全书总图，避免被单章的稀疏图谱误导。";
+    canvas.innerHTML = `<p class="muted">No clear graph nodes are available in the ${scopeLabel} yet.</p>`;
+    detail.textContent =
+      state.graphViewScope === "book"
+        ? "The book graph exists, but there are not enough visible nodes or relations to display at the current reading boundary."
+        : "The current chapter is sparse. Switch to the whole-book graph if you want a broader view.";
     return;
   }
 
   badge.textContent = `${data.stats.node_count} nodes / ${data.stats.edge_count} edges`;
-  caption.textContent = state.graphViewScope === "book"
-    ? `当前显示全书总图，展示截至当前阅读进度可见的全书节点与关系，共有 ${data.stats.node_count} 个节点和 ${data.stats.edge_count} 条边。`
-    : `当前显示第 ${data.chapter_index} 章的局部知识图谱，共有 ${data.stats.node_count} 个节点和 ${data.stats.edge_count} 条边。`;
+  caption.textContent =
+    state.graphViewScope === "book"
+      ? `Showing the whole-book graph inside the current visible reading scope. Nodes: ${data.stats.node_count}, edges: ${data.stats.edge_count}.`
+      : `Showing the current chapter graph for chapter ${data.chapter_index}. Nodes: ${data.stats.node_count}, edges: ${data.stats.edge_count}.`;
 
   const width = 760;
   const height = 420;
@@ -915,6 +813,7 @@ function renderGraphPanel() {
   const centerY = height / 2;
   const radius = Math.max(120, Math.min(170, 42 + data.nodes.length * 10));
   const positions = {};
+
   data.nodes.forEach((node, index) => {
     const angle = (Math.PI * 2 * index) / Math.max(1, data.nodes.length);
     positions[node.id] = {
@@ -923,7 +822,7 @@ function renderGraphPanel() {
     };
   });
 
-  const edgeMarkup = data.edges
+  const edgeMarkup = (data.edges || [])
     .map((edge) => {
       const source = positions[edge.source];
       const target = positions[edge.target];
@@ -933,14 +832,14 @@ function renderGraphPanel() {
       const midX = (source.x + target.x) / 2;
       const midY = (source.y + target.y) / 2;
       return `
-        <g class="graph-edge-group" data-edge-id="${edge.id}">
+        <g class="graph-edge-group" data-edge-id="${escapeHtml(edge.id)}">
           <line
             class="graph-edge ${edge.status !== "active" ? "is-invalidated" : ""}"
             x1="${source.x}"
             y1="${source.y}"
             x2="${target.x}"
             y2="${target.y}"
-            data-edge-id="${edge.id}"
+            data-edge-id="${escapeHtml(edge.id)}"
           ></line>
           <text class="graph-edge-label" x="${midX}" y="${midY - 6}">${escapeHtml(edge.label)}</text>
         </g>
@@ -953,13 +852,14 @@ function renderGraphPanel() {
       const position = positions[node.id];
       const size = Math.max(18, Math.min(34, 14 + Math.round((node.mention_count || 0) / 2)));
       return `
-        <g class="graph-node" data-node-id="${node.id}">
+        <g class="graph-node" data-node-id="${escapeHtml(node.id)}">
           <circle
             class="graph-node-circle type-${escapeHtml(node.type || "unknown")}"
             cx="${position.x}"
             cy="${position.y}"
             r="${size}"
-            data-node-id="${node.id}"
+            fill="${graphNodeColor(node.type)}"
+            data-node-id="${escapeHtml(node.id)}"
           ></circle>
           <text class="graph-node-label" x="${position.x}" y="${position.y + size + 14}">${escapeHtml(node.label)}</text>
         </g>
@@ -969,7 +869,7 @@ function renderGraphPanel() {
 
   const communityMarkup = Array.isArray(data.communities) && data.communities.length
     ? `<div class="graph-community-summary"><strong>Communities:</strong> ${data.communities
-        .map((item) => `${escapeHtml(item.label)} (${item.entity_count})`)
+        .map((community) => `${escapeHtml(community.label)} (${community.entity_count})`)
         .join(" / ")}</div>`
     : "";
 
@@ -981,7 +881,7 @@ function renderGraphPanel() {
     ${communityMarkup}
   `;
 
-  detail.textContent = "鐐瑰嚮鑺傜偣鏌ョ湅浜虹墿/姒傚康鎽樿锛岀偣鍑昏竟鏌ョ湅鍏崇郴浜嬪疄銆?;
+  detail.textContent = "Click a node to inspect the entity summary, or click an edge to inspect the relation.";
 
   canvas.querySelectorAll("[data-node-id]").forEach((nodeElement) => {
     nodeElement.addEventListener("click", (event) => {
@@ -990,12 +890,11 @@ function renderGraphPanel() {
       if (!node) {
         return;
       }
-      state.graphSelection = { kind: "node", id: nodeId };
       detail.innerHTML = `
         <strong>${escapeHtml(node.label)}</strong> 路 ${escapeHtml(node.type || "entity")}<br />
-        鎻愬強娆℃暟锛?{node.mention_count || 0}<br />
-        棣栨鍑虹幇锛氱 ${node.first_seen_chapter || "-"} 绔?/ 娈佃惤 ${node.first_seen_paragraph || "-"}<br />
-        ${escapeHtml(node.summary || "褰撳墠杩樻病鏈変负杩欎釜鑺傜偣鐢熸垚鎽樿銆?)}
+        Mentions: ${node.mention_count || 0}<br />
+        First seen: chapter ${node.first_seen_chapter || "-"}, paragraph ${node.first_seen_paragraph || "-"}<br />
+        ${escapeHtml(node.summary || "No summary available for this node.")}
       `;
     });
   });
@@ -1007,12 +906,11 @@ function renderGraphPanel() {
       if (!edge) {
         return;
       }
-      state.graphSelection = { kind: "edge", id: edgeId };
       detail.innerHTML = `
         <strong>${escapeHtml(edge.label)}</strong> 路 ${escapeHtml(edge.state_family || "relation")}<br />
-        鐢熸晥浣嶇疆锛氱 ${edge.valid_at_chapter || "-"} 绔?/ 娈佃惤 ${edge.valid_at_paragraph || "-"}<br />
-        鐘舵€侊細${escapeHtml(edge.status || "unknown")}<br />
-        ${escapeHtml(edge.fact || "褰撳墠娌℃湁鍙樉绀虹殑鍏崇郴璇存槑銆?)}
+        Valid at: chapter ${edge.valid_at_chapter || "-"}, paragraph ${edge.valid_at_paragraph || "-"}<br />
+        Status: ${escapeHtml(edge.status || "unknown")}<br />
+        ${escapeHtml(edge.fact || "No fact string is available for this relation.")}
       `;
     });
   });
@@ -1043,11 +941,10 @@ async function refreshKnowledgeGraph() {
 
 async function toggleKnowledgeGraph() {
   state.graphViewVisible = !state.graphViewVisible;
-  if (!state.graphViewVisible) {
-    renderGraphPanel();
-    return;
+  renderGraphPanel();
+  if (state.graphViewVisible) {
+    await refreshKnowledgeGraph();
   }
-  await refreshKnowledgeGraph();
 }
 
 async function setKnowledgeGraphScope(scope) {
@@ -1065,7 +962,7 @@ function createInlineBubbleMarkup(text, chunkId) {
   const bubbles = (state.inlineBubblesByChunk[chunkId] || [])
     .map((bubble) => ({ ...bubble, index: text.indexOf(bubble.anchor_text) }))
     .filter((bubble) => bubble.index >= 0)
-    .sort((left, right) => left.index - right.index);
+    .sort((a, b) => a.index - b.index);
 
   if (!bubbles.length) {
     return escapeHtml(text);
@@ -1081,14 +978,14 @@ function createInlineBubbleMarkup(text, chunkId) {
     const end = start + bubble.anchor_text.length;
     markup += escapeHtml(text.slice(cursor, start));
     markup += `
-      <span class="inline-bubble" data-bubble-id="${bubble.bubble_id}">
+      <span class="inline-bubble" data-bubble-id="${escapeHtml(bubble.bubble_id)}">
         <button
           class="inline-bubble-anchor"
           type="button"
-          data-bubble-id="${bubble.bubble_id}"
+          data-bubble-id="${escapeHtml(bubble.bubble_id)}"
           aria-label="${escapeHtml(bubble.label)}"
         >${escapeHtml(bubble.anchor_text)}</button>
-        <span class="inline-bubble-tip" data-bubble-id="${bubble.bubble_id}">
+        <span class="inline-bubble-tip" data-bubble-id="${escapeHtml(bubble.bubble_id)}">
           <strong>${escapeHtml(bubble.label)}</strong>${escapeHtml(bubble.comment)}
         </span>
       </span>
@@ -1100,8 +997,8 @@ function createInlineBubbleMarkup(text, chunkId) {
 }
 
 function wireInlineBubbleToggles() {
-  document.querySelectorAll(".inline-bubble-anchor").forEach((node) => {
-    node.addEventListener("click", (event) => {
+  document.querySelectorAll(".inline-bubble-anchor").forEach((button) => {
+    button.addEventListener("click", (event) => {
       const bubbleId = event.currentTarget.dataset.bubbleId;
       document.querySelectorAll(".inline-bubble-tip.is-open").forEach((tip) => {
         if (tip.dataset.bubbleId !== bubbleId) {
@@ -1124,7 +1021,7 @@ function renderPassages() {
   updatePageIndicator();
 
   if (!pageItems.length) {
-    container.innerHTML = '<p class="muted">褰撳墠绔犺妭杩樻病鏈夊彲鏄剧ず鐨勫唴瀹广€?/p>';
+    container.innerHTML = `<p class="muted">There is no visible content in the current chapter yet.</p>`;
     return;
   }
 
@@ -1132,8 +1029,8 @@ function renderPassages() {
   page.className = "reading-page";
   page.innerHTML = `
     <header class="reading-page-header">
-      <span>绗?${state.activeChapter} 绔?/span>
-      <span>绗?${state.activePageIndex + 1} 椤?/span>
+      <span>Chapter ${state.activeChapter}</span>
+      <span>Page ${state.activePageIndex + 1}</span>
     </header>
   `;
 
@@ -1144,7 +1041,7 @@ function renderPassages() {
     wrapper.dataset.paragraphIndex = String(paragraphIndex);
     wrapper.innerHTML = `
       <span class="paragraph-marker">${paragraphIndex}</span>
-      <div class="reading-paragraph-text">${createInlineBubbleMarkup(passage.text, passage.chunk_id)}</div>
+      <div class="reading-paragraph-text">${createInlineBubbleMarkup(passage.text || "", passage.chunk_id)}</div>
     `;
     wrapper.addEventListener("click", () => selectPassage(passage, index, pageItems));
     page.appendChild(wrapper);
@@ -1157,7 +1054,7 @@ function renderPassages() {
 function selectPassage(passage, index, passages) {
   state.activeParagraphIndex = passage.paragraph_index ?? passage._index + 1;
   state.activeChunkId = passage.chunk_id || null;
-  updateProgressFromSelection(passage);
+  updateProgressFromPassage(passage);
   buildSelectionFromPassage(passage, index, passages);
   renderSelectionPreview();
   renderReaderHeader();
@@ -1175,11 +1072,11 @@ function setPage(pageIndex) {
     return;
   }
   state.activePageIndex = Math.max(0, Math.min(pageIndex, pages.length - 1));
-  const currentItems = getCurrentPageItems();
-  const firstVisible = currentItems[0];
+  const pageItems = getCurrentPageItems();
+  const firstVisible = pageItems[0];
   if (firstVisible) {
     state.activeParagraphIndex = firstVisible.paragraph_index ?? firstVisible._index + 1;
-    updateProgressFromSelection(firstVisible);
+    updateProgressFromPassage(firstVisible);
   }
   renderReaderHeader();
   renderPassages();
@@ -1196,20 +1093,19 @@ async function fetchInlineBubbles() {
     renderPassages();
     return;
   }
-  const payload = {
-    book_id: state.activeBook,
-    current_chapter: state.activeChapter,
-    visible_chunk_ids: pageItems.map((item) => item.chunk_id),
-    persona_id: state.personaId,
-    assistant_mode: state.assistantMode,
-    character_name: state.activeCharacterName,
-    max_bubbles: 3,
-  };
   try {
     const bubbles = await fetchJSON(`/api/books/${state.activeBook}/inline-bubbles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        book_id: state.activeBook,
+        current_chapter: state.activeChapter,
+        visible_chunk_ids: pageItems.map((item) => item.chunk_id),
+        persona_id: state.personaId,
+        assistant_mode: state.assistantMode,
+        character_name: state.activeCharacterName,
+        max_bubbles: 3,
+      }),
     });
     const map = {};
     bubbles.forEach((bubble) => {
@@ -1221,7 +1117,7 @@ async function fetchInlineBubbles() {
     state.inlineBubblesByChunk = map;
     renderPassages();
   } catch (error) {
-    console.error("bubble generation failed", error);
+    console.error("Inline bubble generation failed", error);
   }
 }
 
@@ -1231,7 +1127,8 @@ async function loadCharacterCandidates() {
     renderCharacterCandidates();
     return;
   }
-  setButtonLoading("character-generate-btn", true, "姝ｅ湪璇诲彇瑙掕壊鍊欓€?..");
+
+  setButtonLoading("character-generate-btn", true, "Loading candidates...");
   try {
     state.characterCandidates = await fetchJSON(
       `/api/books/${state.activeBook}/characters?current_chapter=${state.activeChapter}&limit=12`
@@ -1240,7 +1137,9 @@ async function loadCharacterCandidates() {
   } catch (error) {
     state.characterCandidates = [];
     renderCharacterCandidates();
-    document.getElementById("character-profile-card").innerHTML = `<p class="muted">瑙掕壊鍊欓€夎鍙栧け璐ワ細${error.message}</p>`;
+    document.getElementById("character-profile-card").innerHTML = `<p class="muted">Failed to load character candidates: ${escapeHtml(
+      error.message
+    )}</p>`;
   } finally {
     setButtonLoading("character-generate-btn", false);
   }
@@ -1250,18 +1149,21 @@ async function generateCharacterProfile() {
   if (!state.activeBook) {
     return;
   }
+
   const typedName = document.getElementById("character-input").value.trim();
   const selectedName = document.getElementById("character-select").value.trim();
   const characterName = typedName || selectedName;
   if (!characterName) {
     document.getElementById("character-profile-card").innerHTML =
-      '<p class="muted">璇峰厛閫夋嫨涓€涓鑹诧紝鎴栨墜鍔ㄨ緭鍏ヨ鑹插悕鍚庡啀鐢熸垚鐢诲儚銆?/p>';
+      `<p class="muted">Choose a candidate or enter a character name before building a character profile.</p>`;
     return;
   }
+
   state.activeCharacterName = characterName;
   renderAssistantStatus();
-  setButtonLoading("character-generate-btn", true, "姝ｅ湪鐢熸垚瑙掕壊鐢诲儚...");
+  setButtonLoading("character-generate-btn", true, "Building profile...");
   startPendingWorkflow("characterProfile", "building-profile");
+
   try {
     const profile = await fetchJSON(`/api/books/${state.activeBook}/characters/profile`, {
       method: "POST",
@@ -1279,10 +1181,12 @@ async function generateCharacterProfile() {
     if (state.assistantMode === "character") {
       await fetchInlineBubbles();
     }
-    finishPendingWorkflow("done", "Character Profile Ready", "瑙掕壊鐢诲儚宸茬粡鐢熸垚锛屽彲浠ョ洿鎺ョ户缁鑹查櫔璇汇€?);
+    finishPendingWorkflow("done", "Character profile ready", "The character profile has been built from the currently visible reading scope.");
   } catch (error) {
-    document.getElementById("character-profile-card").innerHTML = `<p class="muted">瑙掕壊鐢诲儚鐢熸垚澶辫触锛?{error.message}</p>`;
-    setPendingState(false, "idle");
+    document.getElementById("character-profile-card").innerHTML = `<p class="muted">Failed to build character profile: ${escapeHtml(
+      error.message
+    )}</p>`;
+    setPendingState(false);
   } finally {
     if (state.pendingWorkflow) {
       releasePendingState();
@@ -1298,6 +1202,7 @@ async function setActiveChapter(chapter) {
   state.activeChunkId = null;
   state.activeCharacterProfile = null;
   resetSelection();
+
   const passages = getCurrentPassages();
   const first = passages[0] || null;
   state.activeParagraphIndex = first ? first.paragraph_index ?? 1 : null;
@@ -1311,6 +1216,7 @@ async function setActiveChapter(chapter) {
     dwell_seconds: 0,
     updated_at: new Date().toISOString(),
   };
+
   renderChapterNav();
   renderChapterSelects();
   renderReaderHeader();
@@ -1327,16 +1233,21 @@ async function setActiveChapter(chapter) {
 async function loadPersonas() {
   state.personas = await fetchJSON("/api/personas");
   const select = document.getElementById("persona-select");
-  select.innerHTML = state.personas.map((persona) => `<option value="${persona.persona_id}">${persona.name}</option>`).join("");
+  select.innerHTML = state.personas
+    .map((persona) => `<option value="${escapeHtml(persona.persona_id)}">${escapeHtml(persona.name)}</option>`)
+    .join("");
+
   const preferred =
     state.personas.find((persona) => persona.persona_id === state.personaId) ||
     state.personas.find((persona) => persona.persona_id !== "neutral") ||
     state.personas[0] ||
     null;
+
   if (preferred) {
     state.personaId = preferred.persona_id;
     select.value = state.personaId;
   }
+
   select.addEventListener("change", async (event) => {
     state.personaId = event.target.value;
     renderPersonaDetails();
@@ -1345,6 +1256,7 @@ async function loadPersonas() {
       await fetchInlineBubbles();
     }
   });
+
   renderPersonaDetails();
 }
 
@@ -1362,7 +1274,6 @@ async function openBook(bookId) {
   state.activeCharacterProfile = null;
   state.graphViewData = null;
   state.graphViewError = "";
-  state.graphSelection = null;
   renderBooks();
   renderChatHistory();
   renderGraphPanel();
@@ -1375,11 +1286,15 @@ async function uploadBook(event) {
   if (!input.files[0]) {
     return;
   }
-  setPendingState(true, "starting-upload");
+
+  setPendingState(true, "starting-upload", "Starting upload", "Creating an upload job and waiting for the pipeline to begin.");
   try {
     const payload = new FormData();
     payload.append("file", input.files[0]);
-    const job = await fetchJSON("/api/upload-jobs", { method: "POST", body: payload });
+    const job = await fetchJSON("/api/upload-jobs", {
+      method: "POST",
+      body: payload,
+    });
     applyUploadJobState(job);
     const uploaded = await waitForUploadJob(job.job_id);
     await loadBooks();
@@ -1387,13 +1302,13 @@ async function uploadBook(event) {
     input.value = "";
     finishPendingWorkflow(
       "done",
-      "Temporal Graph Ready",
-      `銆?{uploaded.book_title || uploaded.title}銆嬪凡缁忓畬鎴愮珷鑺傚垏鍒嗐€乪pisode 鏋勫缓涓?temporal graph 鍐欏叆銆俙
+      "Temporal graph ready",
+      `${uploaded.book_title || uploaded.title} has been parsed and its temporal graph is ready for reading.`
     );
   } catch (error) {
-    pushConversation("assistant", `瀵煎叆澶辫触锛?{error.message}`);
+    pushConversation("assistant", `Import failed: ${error.message}`);
     renderChatHistory();
-    setPendingState(false, "idle");
+    setPendingState(false);
   } finally {
     if (state.pendingWorkflow) {
       releasePendingState();
@@ -1418,7 +1333,7 @@ async function askAssistant() {
   pushConversation("user", question);
   renderChatHistory();
   renderComposerQuestion("");
-  setButtonLoading("ask-btn", true, "姝ｅ湪鎬濊€?..");
+  setButtonLoading("ask-btn", true, "Generating answer...");
   startPendingWorkflow(
     state.assistantMode === "persona" ? "personaQa" : "characterQa",
     state.assistantMode === "persona" ? "persona-answering" : "character-answering"
@@ -1442,7 +1357,7 @@ async function askAssistant() {
       answer = response.answer;
     } else {
       if (!state.activeCharacterName) {
-        throw new Error("璇峰厛鐢熸垚鎴栭€夋嫨涓€涓鑹茬敾鍍忥紝鍐嶅彂璧疯鑹查櫔璇婚棶绛斻€?);
+        throw new Error("Choose or build a character profile before asking the character agent.");
       }
       const response = await fetchJSON(`/api/books/${state.activeBook}/characters/chat`, {
         method: "POST",
@@ -1463,15 +1378,15 @@ async function askAssistant() {
     renderChatHistory();
     finishPendingWorkflow(
       "done",
-      state.assistantMode === "persona" ? "Persona Answer Ready" : "Character Answer Ready",
+      state.assistantMode === "persona" ? "Literary answer ready" : "Character answer ready",
       state.assistantMode === "persona"
-        ? "鍚嶅 agent 宸插畬鎴愬浘璋辨绱€乸ersona RAG 涓庨槻鍓ч€忚繃婊ゅ悗鐨勫洖绛斻€?
-        : "瑙掕壊闄 agent 宸插畬鎴愬綋鍓嶅彲瑙佽寖鍥村唴鐨勮鑹插寲鍥炵瓟銆?
+        ? "The literary agent answer has been generated from visible book context, persona RAG, and prompt policy."
+        : "The character agent answer has been generated from visible book context and character profile grounding."
     );
   } catch (error) {
-    pushConversation("assistant", `闂瓟澶辫触锛?{error.message}`);
+    pushConversation("assistant", `Question failed: ${error.message}`);
     renderChatHistory();
-    setPendingState(false, "idle");
+    setPendingState(false);
   } finally {
     setButtonLoading("ask-btn", false);
     if (state.pendingWorkflow) {
@@ -1484,7 +1399,8 @@ async function summarizeChapter() {
   if (!state.activeBook) {
     return;
   }
-  setButtonLoading("summary-btn", true, "姝ｅ湪鐢熸垚鎬荤粨...");
+
+  setButtonLoading("summary-btn", true, "Summarizing...");
   startPendingWorkflow("chapterSummary", "chapter-summary");
   try {
     const response = await fetchJSON("/api/summary", {
@@ -1500,11 +1416,11 @@ async function summarizeChapter() {
     renderAssistantMode();
     pushConversation("assistant", response.summary);
     renderChatHistory();
-    finishPendingWorkflow("done", "Chapter Summary Ready", "褰撳墠绔犺妭鎬荤粨宸茬粡鍩轰簬宸茶 episode 涓庢椂搴忓浘鐘舵€佺敓鎴愬畬鎴愩€?);
+    finishPendingWorkflow("done", "Chapter summary ready", "The current chapter summary has been generated from visible chapter context and graph state.");
   } catch (error) {
-    pushConversation("assistant", `绔犺妭鎬荤粨澶辫触锛?{error.message}`);
+    pushConversation("assistant", `Summary failed: ${error.message}`);
     renderChatHistory();
-    setPendingState(false, "idle");
+    setPendingState(false);
   } finally {
     setButtonLoading("summary-btn", false);
     if (state.pendingWorkflow) {
@@ -1600,3 +1516,5 @@ async function bootstrap() {
 bootstrap().catch((error) => {
   console.error(error);
 });
+
+
