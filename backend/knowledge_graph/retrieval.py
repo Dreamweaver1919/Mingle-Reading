@@ -33,7 +33,110 @@ class TemporalGraphRetriever:
     """Retrieve progress-aware temporal context with graph filters and browse support."""
 
     def retrieve(self, graph: TemporalContextGraph, query: GraphQuery) -> GraphRetrievalResult:
-        visible_episode_ids = graph.visible_episode_ids(query.max_chapter, query.max_paragraph)
+        visible_episode_ids, visible_entity_ids = self._resolve_visibility(graph, query)
+        query_tokens = _tokenize(query.query)
+        requested_entity_terms = {item.strip().lower() for item in query.entity_names if item.strip()}
+        requested_tags = set(query.tags)
+        requested_node_types = set(query.node_types)
+
+        search_results: dict[str, list[GraphHit]] = {
+            "episode": [],
+            "chapter": [],
+            "entity": [],
+            "relation": [],
+            "community": [],
+            "saga": [],
+        }
+        if not requested_node_types or "episode" in requested_node_types:
+            search_results["episode"] = self._retrieve_episodes(
+                graph=graph,
+                query=query,
+                query_tokens=query_tokens,
+                visible_episode_ids=visible_episode_ids,
+                requested_entity_terms=requested_entity_terms,
+                requested_tags=requested_tags,
+            )
+        ranked_episode_hits = sorted(search_results["episode"], key=lambda item: item.score, reverse=True)[: query.top_k]
+        supporting_episode_ids = {hit.hit_id for hit in ranked_episode_hits if hit.hit_type == "episode"}
+
+        if query.include_chapters and (not requested_node_types or "chapter" in requested_node_types):
+            search_results["chapter"] = self._retrieve_chapters(graph, query, supporting_episode_ids, query_tokens)
+        if query.include_entities and (not requested_node_types or "entity" in requested_node_types):
+            search_results["entity"] = self._retrieve_entities(
+                graph, query, visible_entity_ids, supporting_episode_ids, query_tokens
+            )
+        if query.include_relations and (not requested_node_types or "relation" in requested_node_types):
+            search_results["relation"] = self._retrieve_relations(
+                graph,
+                query,
+                visible_episode_ids,
+                visible_entity_ids,
+                supporting_episode_ids,
+                query_tokens,
+            )
+        if query.include_communities and (not requested_node_types or "community" in requested_node_types):
+            search_results["community"] = self._retrieve_communities(graph, query, supporting_episode_ids, query_tokens)
+        if query.include_sagas and (not requested_node_types or "saga" in requested_node_types):
+            search_results["saga"] = self._retrieve_sagas(graph, query, supporting_episode_ids, query_tokens)
+
+        expansion_hits = self._graph_expand_hits(
+            graph=graph,
+            query=query,
+            visible_episode_ids=visible_episode_ids,
+            visible_entity_ids=visible_entity_ids,
+            seed_episode_hits=ranked_episode_hits,
+            seed_entity_hits=search_results["entity"][: max(2, query.top_k // 2)],
+        )
+        for hit in expansion_hits:
+            search_results.setdefault(hit.hit_type, []).append(hit)
+
+        reranked_hits = self._rerank_hits(search_results, query)
+        structured_context = self._construct_context(graph, reranked_hits)
+        hit_breakdown = Counter(hit.hit_type for hit in reranked_hits)
+        search_counts = {key: len(value) for key, value in search_results.items()}
+        return GraphRetrievalResult(
+            query=query,
+            hits=reranked_hits,
+            visible_episode_count=len(visible_episode_ids),
+            visible_entity_count=len(visible_entity_ids),
+            applied_filters={
+                "window_mode": query.window_mode,
+                "max_chapter": query.max_chapter,
+                "max_paragraph": query.max_paragraph,
+                "min_chapter": query.min_chapter,
+                "min_paragraph": query.min_paragraph,
+                "recent_episode_count": query.recent_episode_count,
+                "entity_names": query.entity_names,
+                "entity_types": query.entity_types,
+                "relation_types": query.relation_types,
+                "state_families": query.state_families,
+                "relation_statuses": query.relation_statuses,
+                "tags": query.tags,
+                "node_types": query.node_types,
+                "metadata_filters": query.metadata_filters,
+            },
+            hit_type_breakdown=dict(hit_breakdown),
+            graph_metadata=graph.metadata,
+            graph_stats=graph.stats(),
+            retrieval_trace={
+                "search_counts": search_counts,
+                "supporting_episode_ids": sorted(supporting_episode_ids),
+                "reranked_hit_ids": [hit.hit_id for hit in reranked_hits],
+            },
+            structured_context=structured_context,
+        )
+
+    def _resolve_visibility(
+        self,
+        graph: TemporalContextGraph,
+        query: GraphQuery,
+    ) -> tuple[list[str], set[str]]:
+        base_visible_episode_ids = graph.visible_episode_ids(query.max_chapter, query.max_paragraph)
+        if query.window_mode == "recent":
+            visible_episode_ids = base_visible_episode_ids[-query.recent_episode_count :]
+        else:
+            visible_episode_ids = base_visible_episode_ids
+
         visible_entity_ids = {
             entity_id
             for entity_id, entity in graph.entities.items()
@@ -47,72 +150,202 @@ class TemporalGraphRetriever:
             )
             and (query.min_chapter is None or entity.last_seen_chapter >= query.min_chapter)
         }
-        query_tokens = _tokenize(query.query)
-        requested_entity_terms = {item.strip().lower() for item in query.entity_names if item.strip()}
-        requested_tags = set(query.tags)
-        requested_node_types = set(query.node_types)
+        if query.window_mode == "recent":
+            recent_entity_ids = set()
+            for episode_id in visible_episode_ids:
+                recent_entity_ids.update(graph.episodes[episode_id].entity_ids)
+            visible_entity_ids = visible_entity_ids.intersection(recent_entity_ids)
+        return visible_episode_ids, visible_entity_ids
 
-        episode_hits: list[GraphHit] = []
-        if not requested_node_types or "episode" in requested_node_types:
-            episode_hits = self._retrieve_episodes(
-                graph=graph,
-                query=query,
-                query_tokens=query_tokens,
-                visible_episode_ids=visible_episode_ids,
-                requested_entity_terms=requested_entity_terms,
-                requested_tags=requested_tags,
-            )
-        ranked_episode_hits = sorted(episode_hits, key=lambda item: item.score, reverse=True)[: query.top_k]
-        output_hits = list(ranked_episode_hits)
-        supporting_episode_ids = {hit.hit_id for hit in ranked_episode_hits if hit.hit_type == "episode"}
-
-        if query.include_chapters and (not requested_node_types or "chapter" in requested_node_types):
-            output_hits.extend(self._retrieve_chapters(graph, query, supporting_episode_ids, query_tokens))
-        if query.include_entities and (not requested_node_types or "entity" in requested_node_types):
-            output_hits.extend(
-                self._retrieve_entities(graph, query, visible_entity_ids, supporting_episode_ids, query_tokens)
-            )
-        if query.include_relations and (not requested_node_types or "relation" in requested_node_types):
-            output_hits.extend(
-                self._retrieve_relations(
-                    graph,
-                    query,
-                    visible_episode_ids,
-                    visible_entity_ids,
-                    supporting_episode_ids,
-                    query_tokens,
+    def _graph_expand_hits(
+        self,
+        *,
+        graph: TemporalContextGraph,
+        query: GraphQuery,
+        visible_episode_ids: list[str],
+        visible_entity_ids: set[str],
+        seed_episode_hits: list[GraphHit],
+        seed_entity_hits: list[GraphHit],
+    ) -> list[GraphHit]:
+        hits: list[GraphHit] = []
+        seen_ids = {hit.hit_id for hit in seed_episode_hits + seed_entity_hits}
+        visible_episode_set = set(visible_episode_ids)
+        for hit in seed_episode_hits[:2]:
+            episode = graph.episodes.get(hit.hit_id)
+            if episode is None:
+                continue
+            for entity_id in episode.entity_ids:
+                if entity_id not in visible_entity_ids or entity_id in seen_ids:
+                    continue
+                entity = graph.entities[entity_id]
+                hits.append(
+                    GraphHit(
+                        hit_id=entity_id,
+                        hit_type="entity",
+                        score=round(hit.score * 0.7, 4),
+                        reason="graph_bfs_from_episode",
+                        chapter_index=entity.first_seen_chapter,
+                        payload={
+                            "canonical_name": entity.canonical_name,
+                            "entity_type": entity.entity_type,
+                            "summary": entity.summary,
+                            "episode_ids": entity.episode_ids[:6],
+                        },
+                        provenance=[
+                            graph.episodes[episode_id].provenance[0]
+                            for episode_id in entity.episode_ids[:2]
+                            if episode_id in graph.episodes and graph.episodes[episode_id].provenance
+                        ],
+                    )
                 )
-            )
-        if query.include_communities and (not requested_node_types or "community" in requested_node_types):
-            output_hits.extend(self._retrieve_communities(graph, query, supporting_episode_ids, query_tokens))
-        if query.include_sagas and (not requested_node_types or "saga" in requested_node_types):
-            output_hits.extend(self._retrieve_sagas(graph, query, supporting_episode_ids, query_tokens))
+                seen_ids.add(entity_id)
+        for hit in seed_entity_hits[:3]:
+            entity_id = hit.hit_id
+            for neighbor in graph.entity_neighbors(entity_id):
+                neighbor_id = neighbor["entity_id"]
+                if neighbor_id not in visible_entity_ids or neighbor_id in seen_ids:
+                    continue
+                relation_matches = graph.relation_lookup(entity_id, neighbor_id, include_invalidated=query.include_invalidated_relations)
+                relation_matches = [
+                    relation
+                    for relation in relation_matches
+                    if set(relation.episode_ids).intersection(visible_episode_set)
+                ]
+                if not relation_matches:
+                    continue
+                relation = relation_matches[-1]
+                hits.append(
+                    GraphHit(
+                        hit_id=relation.edge_id,
+                        hit_type="relation",
+                        score=round(hit.score * 0.65, 4),
+                        reason="graph_bfs_from_entity",
+                        chapter_index=relation.valid_at_chapter,
+                        payload={
+                            "source_entity_id": relation.source_entity_id,
+                            "target_entity_id": relation.target_entity_id,
+                            "relation_type": relation.relation_type,
+                            "state_family": relation.state_family,
+                            "fact": relation.fact,
+                            "weight": relation.weight,
+                            "episode_ids": relation.episode_ids[:6],
+                        },
+                        provenance=relation.provenance[:2],
+                    )
+                )
+                seen_ids.add(relation.edge_id)
+        return hits
 
-        output_hits = sorted(output_hits, key=lambda item: (item.score, -(item.chapter_index or 0)), reverse=True)
-        hit_breakdown = Counter(hit.hit_type for hit in output_hits)
-        return GraphRetrievalResult(
-            query=query,
-            hits=output_hits[: max(query.top_k, len(ranked_episode_hits)) + 8],
-            visible_episode_count=len(visible_episode_ids),
-            visible_entity_count=len(visible_entity_ids),
-            applied_filters={
-                "max_chapter": query.max_chapter,
-                "max_paragraph": query.max_paragraph,
-                "min_chapter": query.min_chapter,
-                "min_paragraph": query.min_paragraph,
-                "entity_names": query.entity_names,
-                "entity_types": query.entity_types,
-                "relation_types": query.relation_types,
-                "state_families": query.state_families,
-                "relation_statuses": query.relation_statuses,
-                "tags": query.tags,
-                "node_types": query.node_types,
-                "metadata_filters": query.metadata_filters,
-            },
-            hit_type_breakdown=dict(hit_breakdown),
-            graph_metadata=graph.metadata,
-            graph_stats=graph.stats(),
-        )
+    def _rerank_hits(self, search_results: dict[str, list[GraphHit]], query: GraphQuery) -> list[GraphHit]:
+        all_hits = [hit for hits in search_results.values() for hit in hits]
+        merged: dict[str, GraphHit] = {}
+        for hit in all_hits:
+            existing = merged.get(hit.hit_id)
+            if existing is None or hit.score > existing.score:
+                merged[hit.hit_id] = hit
+
+        node_type_quota = {
+            "episode": max(2, query.top_k // 2),
+            "relation": 3,
+            "entity": 3,
+            "community": 2,
+            "saga": 2,
+            "chapter": 2,
+        }
+        buckets: dict[str, list[GraphHit]] = {}
+        for hit in merged.values():
+            adjusted_score = hit.score
+            if hit.hit_type == "relation":
+                adjusted_score += 0.25
+            elif hit.hit_type == "entity":
+                adjusted_score += 0.15
+            elif hit.hit_type in {"community", "saga"}:
+                adjusted_score += 0.05
+            hit.score = round(adjusted_score, 4)
+            buckets.setdefault(hit.hit_type, []).append(hit)
+
+        reranked: list[GraphHit] = []
+        for hit_type, hits in buckets.items():
+            hits.sort(key=lambda item: (item.score, -(item.chapter_index or 0)), reverse=True)
+            reranked.extend(hits[: node_type_quota.get(hit_type, 2)])
+
+        reranked.sort(key=lambda item: (item.score, -(item.chapter_index or 0)), reverse=True)
+        return reranked[: max(query.top_k, 6) + 6]
+
+    def _construct_context(self, graph: TemporalContextGraph, hits: list[GraphHit]) -> dict[str, Any]:
+        visible_facts: list[dict[str, Any]] = []
+        entities: list[dict[str, Any]] = []
+        communities: list[dict[str, Any]] = []
+        sagas: list[dict[str, Any]] = []
+        citations: list[dict[str, Any]] = []
+
+        for hit in hits:
+            if hit.provenance:
+                provenance = hit.provenance[0]
+                citations.append(
+                    {
+                        "chunk_id": provenance.chunk_id,
+                        "chapter_index": provenance.chapter_index,
+                        "paragraph_index": provenance.paragraph_index,
+                        "source": provenance.source,
+                    }
+                )
+            if hit.hit_type == "relation":
+                payload = dict(hit.payload)
+                source = graph.entities.get(payload.get("source_entity_id"))
+                target = graph.entities.get(payload.get("target_entity_id"))
+                visible_facts.append(
+                    {
+                        "relation_id": hit.hit_id,
+                        "fact": payload.get("fact") or hit.reason,
+                        "relation_type": payload.get("relation_type"),
+                        "state_family": payload.get("state_family"),
+                        "story_timeline": {
+                            "chapter": payload.get("valid_at_chapter"),
+                            "paragraph": payload.get("valid_at_paragraph"),
+                        },
+                        "source_name": source.canonical_name if source else payload.get("source_entity_id"),
+                        "target_name": target.canonical_name if target else payload.get("target_entity_id"),
+                        "provenance": [item.model_dump() for item in hit.provenance],
+                    }
+                )
+            elif hit.hit_type == "entity":
+                entities.append(
+                    {
+                        "entity_id": hit.hit_id,
+                        "canonical_name": hit.payload.get("canonical_name"),
+                        "entity_type": hit.payload.get("entity_type"),
+                        "summary": hit.payload.get("summary"),
+                        "provenance": [item.model_dump() for item in hit.provenance],
+                    }
+                )
+            elif hit.hit_type == "community":
+                communities.append(
+                    {
+                        "community_id": hit.hit_id,
+                        "label": hit.payload.get("label"),
+                        "summary": hit.payload.get("summary"),
+                        "entity_ids": hit.payload.get("entity_ids", []),
+                    }
+                )
+            elif hit.hit_type == "saga":
+                sagas.append(
+                    {
+                        "saga_id": hit.hit_id,
+                        "label": hit.payload.get("label"),
+                        "summary": hit.payload.get("summary"),
+                        "chapter_start": hit.payload.get("chapter_start"),
+                        "chapter_end": hit.payload.get("chapter_end"),
+                    }
+                )
+
+        return {
+            "visible_facts": visible_facts[:8],
+            "entities": entities[:6],
+            "local_communities": communities[:4],
+            "long_arcs": sagas[:4],
+            "citations": citations[:10],
+        }
 
     def _retrieve_episodes(
         self,

@@ -469,6 +469,60 @@ def graph_metadata(book_id: str):
         }
 
 
+@app.get("/api/books/{book_id}/graph/audit")
+def graph_audit(book_id: str, relation_id: str | None = None, entity_id: str | None = None):
+    graph = get_or_build_graph(book_id)
+    if relation_id:
+        relation = graph.relations.get(relation_id)
+        if relation is None:
+            raise HTTPException(status_code=404, detail="relation_not_found")
+        return {
+            "relation": relation.model_dump(),
+            "story_timeline": relation.story_timeline,
+            "system_timeline": relation.system_timeline,
+            "source_entity": graph.entities.get(relation.source_entity_id).model_dump()
+            if relation.source_entity_id in graph.entities
+            else None,
+            "target_entity": graph.entities.get(relation.target_entity_id).model_dump()
+            if relation.target_entity_id in graph.entities
+            else None,
+            "supersedes": [
+                graph.relations[edge_id].model_dump()
+                for edge_id in relation.supersedes_edge_ids
+                if edge_id in graph.relations
+            ],
+            "provenance": [item.model_dump() for item in relation.provenance],
+        }
+    if entity_id:
+        entity = graph.entities.get(entity_id)
+        if entity is None:
+            raise HTTPException(status_code=404, detail="entity_not_found")
+        relation_history = [
+            relation.model_dump()
+            for relation in graph.relations.values()
+            if relation.source_entity_id == entity_id or relation.target_entity_id == entity_id
+        ]
+        relation_history.sort(key=lambda item: (item["valid_at_chapter"], item["valid_at_paragraph"]))
+        return {
+            "entity": entity.model_dump(),
+            "relation_history": relation_history,
+            "episodes": [
+                graph.episodes[episode_id].model_dump()
+                for episode_id in entity.episode_ids[:20]
+                if episode_id in graph.episodes
+            ],
+        }
+    return {
+        "graph_id": graph.graph_id,
+        "audit_capabilities": [
+            "relation_evidence_chain",
+            "relation_invalidation_chain",
+            "entity_relation_history",
+            "episode_provenance_trace",
+        ],
+    }
+
+
 @app.get("/api/books/{book_id}/graph/view")
 def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 18, scope: str = "chapter",
                from_chapter: int = 0):
@@ -737,6 +791,7 @@ def orchestrate(payload: dict):
         selection_context=payload.get("selection_context"),
         top_k=payload.get("top_k", 6),
         temporal_graph=graph,
+        window_mode=payload.get("window_mode", "visible"),
     )
     return result.model_dump()
 

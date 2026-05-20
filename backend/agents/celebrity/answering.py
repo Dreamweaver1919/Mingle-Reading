@@ -23,59 +23,49 @@ def _merge_contexts(local_hits: list[RetrievedContext], graph_hits) -> list[Retr
                 text=hit.text,
             ),
         )
-    ranked = sorted(merged.values(), key=lambda item: (item.score, -item.chapter_index, -item.paragraph_index), reverse=True)
-    return ranked
+    return sorted(
+        merged.values(),
+        key=lambda item: (item.score, -item.chapter_index, -item.paragraph_index),
+        reverse=True,
+    )
 
 
-def _build_graph_knowledge_block(graph, query: str, max_chapter: int, top_k: int = 15) -> str:
-    """Extract structured entity and relation knowledge from the graph."""
-    if graph is None:
+def _build_graph_knowledge_block(structured_context: dict | None) -> str:
+    """Build a structured graph knowledge block from retrieval constructor output."""
+    if not structured_context:
         return ""
 
-    query_lower = query.lower()
     parts: list[str] = []
+    visible_facts = structured_context.get("visible_facts", [])
+    entities = structured_context.get("entities", [])
+    communities = structured_context.get("local_communities", [])
+    arcs = structured_context.get("long_arcs", [])
 
-    # Find matching entities
-    matched_entities: list[tuple[int, str, str, str]] = []  # (mentions, name, type, span)
-    for entity in graph.entities.values():
-        if entity.first_seen_chapter > max_chapter:
-            continue
-        name = entity.canonical_name
-        aliases = entity.aliases or []
-        all_forms = [name.lower()] + [a.lower() for a in aliases]
-        if any(q in form or form in q for q in query_lower.split() for form in all_forms if len(q) >= 2):
-            span = f"ch{entity.first_seen_chapter}-{entity.last_seen_chapter}"
-            matched_entities.append((entity.mention_count, name, entity.entity_type, span))
-
-    matched_entities.sort(key=lambda x: x[0], reverse=True)
-    matched_entity_names = {name for _, name, _, _ in matched_entities[:top_k]}
-
-    if matched_entities[:10]:
-        parts.append("知识图谱中的相关实体：")
-        for _, name, etype, span in matched_entities[:10]:
-            parts.append(f"  - {name}（{etype}，出场{span}）")
-
-    # Find relations between matched entities
-    relation_parts: list[str] = []
-    for edge in graph.relations.values():
-        if edge.status != "active":
-            continue
-        if edge.valid_at_chapter > max_chapter:
-            continue
-        source = graph.entities.get(edge.source_entity_id)
-        target = graph.entities.get(edge.target_entity_id)
-        if source is None or target is None:
-            continue
-        if source.canonical_name in matched_entity_names or target.canonical_name in matched_entity_names:
-            relation_parts.append(
-                f"  - {source.canonical_name} --[{edge.relation_type}]--> {target.canonical_name}：{edge.fact}（ch{edge.valid_at_chapter}）"
+    if visible_facts:
+        parts.append("【可见图谱事实】")
+        for item in visible_facts[:10]:
+            parts.append(
+                f"- {item.get('source_name')} --[{item.get('relation_type')}]--> {item.get('target_name')}：{item.get('fact')}"
             )
-    if relation_parts[:15]:
-        parts.append("知识图谱中的相关关系：")
-        parts.extend(relation_parts[:15])
+    if entities:
+        parts.append("【相关实体】")
+        for item in entities[:8]:
+            parts.append(
+                f"- {item.get('canonical_name')}（{item.get('entity_type')}）：{item.get('summary') or 'no summary'}"
+            )
+    if communities:
+        parts.append("【局部关系团簇】")
+        for item in communities[:4]:
+            parts.append(f"- {item.get('label')}：{item.get('summary')}")
+    if arcs:
+        parts.append("【长期叙事弧】")
+        for item in arcs[:4]:
+            parts.append(
+                f"- {item.get('label')}（ch{item.get('chapter_start')}-{item.get('chapter_end')}）：{item.get('summary')}"
+            )
 
     if parts:
-        parts.insert(0, "【知识图谱结构化数据】")
+        parts.insert(0, "【知识图谱结构化上下文】")
     return "\n".join(parts)
 
 
@@ -104,6 +94,7 @@ def build_answer(request: QuestionRequest, chunks) -> QuestionResponse:
         ),
         top_k=request.top_k,
         temporal_graph=graph,
+        window_mode="visible",
     )
     local_contexts = retrieve_chunks(
         chunks=chunks,
@@ -114,7 +105,7 @@ def build_answer(request: QuestionRequest, chunks) -> QuestionResponse:
     contexts = _merge_contexts(local_contexts, orchestration.hits)[: request.top_k]
     visible_context_texts = [context.text for context in contexts]
 
-    graph_knowledge = _build_graph_knowledge_block(graph, request.question, request.current_chapter)
+    graph_knowledge = _build_graph_knowledge_block(orchestration.structured_context)
     if graph_knowledge:
         visible_context_texts.insert(0, graph_knowledge)
 
@@ -124,8 +115,8 @@ def build_answer(request: QuestionRequest, chunks) -> QuestionResponse:
             task="qa",
             book_title=request.book_id,
             question=(
-                "用户的问题超出了已读范围，请拒绝剧透，并把话题收回当前已读内容。"
-                f"\n原问题：{request.question}"
+                "用户的问题超出了已读范围，请拒绝剧透，并把话题收回到当前已读内容。\n"
+                f"原问题：{request.question}"
             ),
             visible_contexts=visible_context_texts,
             current_chapter=request.current_chapter,

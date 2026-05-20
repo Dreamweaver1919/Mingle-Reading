@@ -11,6 +11,8 @@ EntityType = Literal["character", "location", "artifact", "group", "theme", "con
 EpisodeType = Literal["paragraph", "section", "chapter_summary", "reading_event"]
 RelationStatus = Literal["active", "invalidated"]
 RelationDirectionality = Literal["directed", "undirected"]
+FactModality = Literal["asserted", "reported", "inferred", "quoted", "uncertain"]
+WindowMode = Literal["visible", "recent", "historical"]
 
 
 class NodeTable(dict[str, Any]):
@@ -41,6 +43,10 @@ class GraphProvenance(BaseModel):
     paragraph_id: str
     paragraph_index: int
     text_excerpt: str
+    episode_id: str | None = None
+    evidence_text: str = ""
+    evidence_start: int | None = None
+    evidence_end: int | None = None
     source: Literal["chunk", "chapter", "episode", "relation", "community", "saga"] = "chunk"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -49,6 +55,23 @@ class NarrativeLocator(BaseModel):
     chapter_index: int
     paragraph_index: int
     episode_index: int
+
+
+class FactCandidate(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+    relation_family: str = "context"
+    fact_text: str
+    modality: FactModality = "asserted"
+    certainty: float = 0.0
+    tvalid_start_chapter: int | None = None
+    tvalid_start_paragraph: int | None = None
+    tvalid_end_chapter: int | None = None
+    tvalid_end_paragraph: int | None = None
+    evidence_episode_ids: list[str] = Field(default_factory=list)
+    evidence_spans: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChapterTimelineEntry(BaseModel):
@@ -172,6 +195,24 @@ class RelationEdge(BaseModel):
     def validity_end_chapter(self) -> int | None:
         return self.invalid_at_chapter
 
+    @property
+    def story_timeline(self) -> dict[str, int | None]:
+        return {
+            "tvalid_start_chapter": self.valid_at_chapter,
+            "tvalid_start_paragraph": self.valid_at_paragraph,
+            "tvalid_end_chapter": self.invalid_at_chapter,
+            "tvalid_end_paragraph": self.invalid_at_paragraph,
+        }
+
+    @property
+    def system_timeline(self) -> dict[str, str | None]:
+        return {
+            "tcreated_at": self.created_at,
+            "texpired_at": self.expired_at,
+            "invalidated_by_edge_id": self.invalidated_by_edge_id,
+            "invalidated_by_episode_id": self.metadata.get("invalidated_by_episode_id"),
+        }
+
     def is_visible(self, max_chapter: int | None = None, max_paragraph: int | None = None) -> bool:
         if max_chapter is None:
             return True
@@ -202,6 +243,10 @@ class CommunityNode(BaseModel):
     node_kind: Literal["community"] = "community"
     community_id: str
     label: str
+    community_name: str = ""
+    keywords: list[str] = Field(default_factory=list)
+    retrieval_text: str = ""
+    local_summary: str = ""
     summary: str = ""
     entity_ids: list[str] = Field(default_factory=list)
     episode_ids: list[str] = Field(default_factory=list)
@@ -216,11 +261,15 @@ class SagaNode(BaseModel):
     node_kind: Literal["saga"] = "saga"
     saga_id: str
     label: str
+    arc_type: str = "narrative_arc"
+    key_entities: list[str] = Field(default_factory=list)
+    retrieval_text: str = ""
     episode_ids: list[str] = Field(default_factory=list)
     entity_ids: list[str] = Field(default_factory=list)
     relation_ids: list[str] = Field(default_factory=list)
     chapter_start: int = 0
     chapter_end: int = 0
+    chapter_range: tuple[int, int] | None = None
     summary: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     provenance: list[GraphProvenance] = Field(default_factory=list)
@@ -436,10 +485,12 @@ class TemporalContextGraph(BaseModel):
 
 class GraphQuery(BaseModel):
     query: str = ""
+    window_mode: WindowMode = "visible"
     max_chapter: int | None = None
     max_paragraph: int | None = None
     min_chapter: int | None = None
     min_paragraph: int | None = None
+    recent_episode_count: int = 6
     top_k: int = 5
     entity_names: list[str] = Field(default_factory=list)
     entity_types: list[EntityType] = Field(default_factory=list)
@@ -478,3 +529,5 @@ class GraphRetrievalResult(BaseModel):
     hit_type_breakdown: dict[str, int] = Field(default_factory=dict)
     graph_metadata: dict[str, Any] = Field(default_factory=dict)
     graph_stats: GraphStats = Field(default_factory=GraphStats)
+    retrieval_trace: dict[str, Any] = Field(default_factory=dict)
+    structured_context: dict[str, Any] = Field(default_factory=dict)

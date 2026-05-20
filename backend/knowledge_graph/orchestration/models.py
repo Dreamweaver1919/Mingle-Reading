@@ -48,6 +48,7 @@ class RetrievalFilters(BaseModel):
 class RetrievalRequest(BaseModel):
     request_id: str
     scope: Literal["book_text", "graph", "mixed"] = "mixed"
+    window_mode: Literal["visible", "recent", "historical"] = "visible"
     kb_id: str
     query: str
     selection_context: SelectionContext | None = None
@@ -99,6 +100,8 @@ class OrchestrationResult(BaseModel):
     hits: list[RetrievalHit]
     citations: list[Citation]
     guardrail_trace: GuardrailTrace
+    retrieval_trace: dict[str, Any] = Field(default_factory=dict)
+    structured_context: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def citations_match_hits(self) -> "OrchestrationResult":

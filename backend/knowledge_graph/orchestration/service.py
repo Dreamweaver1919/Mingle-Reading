@@ -3,8 +3,8 @@
 from typing import Any
 
 from backend.api.schemas import BookChunk
-from backend.knowledge_graph.models import TemporalContextGraph
-from backend.knowledge_graph.retrieval import search_temporal_graph
+from backend.knowledge_graph.models import GraphQuery, TemporalContextGraph
+from backend.knowledge_graph.retrieval import TemporalGraphRetriever
 
 from .models import (
     Citation,
@@ -31,6 +31,7 @@ class OrchestrationService:
         selection_context: SelectionContext | dict[str, Any] | None = None,
         top_k: int = 6,
         temporal_graph: TemporalContextGraph | None = None,
+        window_mode: str = "visible",
     ) -> OrchestrationResult:
         progress = self._coerce_progress(reading_progress, book_id)
         selection = self._coerce_selection(selection_context, book_id)
@@ -38,6 +39,7 @@ class OrchestrationService:
         retrieval_request = RetrievalRequest(
             request_id=request_id,
             scope="mixed",
+            window_mode=window_mode,  # type: ignore[arg-type]
             kb_id=f"{book_id}-mixed",
             query=self._compose_query(query, selection),
             selection_context=selection,
@@ -47,7 +49,9 @@ class OrchestrationService:
         )
         visible_chunks, trace = self._filter_visible_chunks(chunks, progress, selection, filters)
         text_hits = self._retrieve_text_hits(visible_chunks, retrieval_request)
-        graph_hits = self._retrieve_graph_hits(visible_chunks, retrieval_request, temporal_graph)
+        graph_hits, graph_trace, structured_graph_context = self._retrieve_graph_hits(
+            visible_chunks, retrieval_request, temporal_graph
+        )
         merged_hits = self._merge_hits(text_hits, graph_hits, top_k)
         trace.retrieval_counts = {
             "book_text": len(text_hits),
@@ -71,6 +75,8 @@ class OrchestrationService:
             hits=merged_hits,
             citations=citations,
             guardrail_trace=trace,
+            retrieval_trace=graph_trace,
+            structured_context=structured_graph_context,
         )
 
     def _coerce_progress(
@@ -228,17 +234,20 @@ class OrchestrationService:
         visible_chunks: list[BookChunk],
         retrieval_request: RetrievalRequest,
         temporal_graph: TemporalContextGraph | None = None,
-    ) -> list[RetrievalHit]:
+    ) -> tuple[list[RetrievalHit], dict[str, Any], dict[str, Any]]:
         if temporal_graph is not None:
-            graph_hits = search_temporal_graph(
+            graph_result = TemporalGraphRetriever().retrieve(
                 temporal_graph,
-                query=retrieval_request.query,
-                max_chapter=retrieval_request.reading_progress.chapter_id,
-                max_paragraph=retrieval_request.reading_progress.paragraph_id,
-                top_k=retrieval_request.top_k,
+                GraphQuery(
+                    query=retrieval_request.query,
+                    window_mode=retrieval_request.window_mode,
+                    max_chapter=retrieval_request.reading_progress.chapter_id,
+                    max_paragraph=retrieval_request.reading_progress.paragraph_id,
+                    top_k=retrieval_request.top_k,
+                ),
             )
             hits: list[RetrievalHit] = []
-            for hit in graph_hits:
+            for hit in graph_result.hits:
                 payload = dict(hit.payload)
                 provenance = hit.provenance[0] if hit.provenance else None
                 chunk_id = payload.get("chunk_id") or (provenance.chunk_id if provenance else hit.hit_id)
@@ -258,7 +267,7 @@ class OrchestrationService:
                         metadata=payload,
                     )
                 )
-            return hits
+            return hits, graph_result.retrieval_trace, graph_result.structured_context
 
         character_filters = set(retrieval_request.filters.character_ids)
         theme_filters = set(retrieval_request.filters.theme_tags)
@@ -302,7 +311,7 @@ class OrchestrationService:
                     metadata=self._chunk_metadata(chunk),
                 )
             )
-        return hits
+        return hits, {"fallback": True, "search_counts": {"graph": len(hits)}}, {"visible_facts": [], "entities": [], "local_communities": [], "long_arcs": [], "citations": []}
 
     def _merge_hits(
         self,

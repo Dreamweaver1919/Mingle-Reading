@@ -16,6 +16,7 @@ from .models import (
     CommunityNode,
     EntityNode,
     EpisodeNode,
+    FactCandidate,
     GraphProvenance,
     RelationDirectionality,
     RelationEdge,
@@ -23,6 +24,7 @@ from .models import (
     SagaNode,
     TemporalContextGraph,
 )
+from .relation_schema import build_state_slot, normalize_fact_candidate
 
 
 STATEFUL_FAMILIES = {"location", "membership", "status"}
@@ -63,6 +65,10 @@ def _build_provenance(chunk: BookChunk, source: str, extra_metadata: dict | None
         paragraph_id=chunk.paragraph_id,
         paragraph_index=chunk.paragraph_index,
         text_excerpt=_excerpt(chunk.text),
+        episode_id=metadata.get("episode_id"),
+        evidence_text=str(metadata.get("sentence", "") or metadata.get("evidence_text", "")).strip(),
+        evidence_start=metadata.get("evidence_start"),
+        evidence_end=metadata.get("evidence_end"),
         source=source,  # type: ignore[arg-type]
         metadata=metadata,
     )
@@ -659,6 +665,35 @@ class TemporalGraphBuilder:
                 target_entity = self._match_entity_by_name(fact_candidate.target, entity_nodes)
                 if source_entity is None or target_entity is None or source_entity.entity_id == target_entity.entity_id:
                     continue
+                normalized_fact = normalize_fact_candidate(
+                    fact=FactCandidate(
+                        subject=source_entity.canonical_name,
+                        predicate=fact_candidate.relation_type,
+                        object=target_entity.canonical_name,
+                        relation_family=fact_candidate.state_family,
+                        fact_text=fact_candidate.fact,
+                        certainty=fact_candidate.confidence,
+                        tvalid_start_chapter=chunk.chapter_index,
+                        tvalid_start_paragraph=chunk.paragraph_index,
+                        evidence_episode_ids=[episode.episode_id],
+                        evidence_spans=[
+                            {
+                                "chunk_id": chunk.chunk_id,
+                                "chapter_index": chunk.chapter_index,
+                                "paragraph_index": chunk.paragraph_index,
+                                "evidence_text": fact_candidate.evidence or fact_candidate.fact,
+                            }
+                        ],
+                        metadata={
+                            "raw_relation_type": fact_candidate.relation_type,
+                            "raw_state_family": fact_candidate.state_family,
+                        },
+                    ),
+                    raw_relation_type=fact_candidate.relation_type,
+                    raw_state_family=fact_candidate.state_family,
+                    raw_directionality=fact_candidate.directionality,
+                    target_entity_type=target_entity.entity_type,
+                )
                 relation_ids.extend(
                     self._upsert_relation_edge(
                         chunk=chunk,
@@ -670,13 +705,18 @@ class TemporalGraphBuilder:
                         relation_version_counter=relation_version_counter,
                         source_entity=source_entity,
                         target_entity=target_entity,
-                        relation_type=fact_candidate.relation_type,
-                        state_family=fact_candidate.state_family,
-                        directionality=fact_candidate.directionality,
-                        fact_text=fact_candidate.fact,
+                        relation_type=normalized_fact.relation_type,
+                        state_family=normalized_fact.state_family,
+                        directionality=normalized_fact.directionality,
+                        fact_text=normalized_fact.fact.fact_text,
                         evidence_text=fact_candidate.evidence or fact_candidate.fact,
                         extraction_mode="llm-assisted",
                         confidence=fact_candidate.confidence,
+                        relation_family=normalized_fact.relation_family,
+                        state_slot=normalized_fact.state_slot,
+                        normalization_notes=normalized_fact.normalization_notes,
+                        raw_relation_type=fact_candidate.relation_type,
+                        raw_state_family=fact_candidate.state_family,
                     )
                 )
         return sorted(set(relation_ids))
@@ -700,6 +740,11 @@ class TemporalGraphBuilder:
         evidence_text: str,
         extraction_mode: str,
         confidence: float,
+        relation_family: str,
+        state_slot: str | None,
+        normalization_notes: list[str],
+        raw_relation_type: str,
+        raw_state_family: str,
     ) -> list[str]:
         signature = _fact_signature(
             relation_type=relation_type,
@@ -720,7 +765,13 @@ class TemporalGraphBuilder:
             edge.metadata["confidence"] = max(float(edge.metadata.get("confidence", 0.0)), confidence)
             return [edge.edge_id]
 
-        state_key = _state_key(state_family, source_entity.entity_id, directionality, target_entity.entity_id)
+        state_key = build_state_slot(
+            state_family=state_family,
+            source_entity_id=source_entity.entity_id,
+            directionality=directionality,
+            target_entity_id=target_entity.entity_id,
+            state_slot=state_slot,
+        )
         superseded_edges: list[str] = []
         if state_key:
             active_state_edge_id = active_state_relation_by_key.get(state_key)
@@ -732,6 +783,7 @@ class TemporalGraphBuilder:
                     active_edge.invalid_at_paragraph = chunk.paragraph_index
                     active_edge.expired_at = now
                     active_edge.invalidated_by_edge_id = "pending"
+                    active_edge.metadata["invalidated_by_episode_id"] = episode.episode_id
                     superseded_edges.append(active_edge.edge_id)
 
         base_signature_slug = _slugify(signature)
@@ -761,10 +813,26 @@ class TemporalGraphBuilder:
                 "paragraph_id": chunk.paragraph_id,
                 "sentence_excerpt": _excerpt(evidence_text, limit=240),
                 "state_key": state_key,
+                "state_slot": state_slot,
+                "relation_family": relation_family,
+                "raw_relation_type": raw_relation_type,
+                "raw_state_family": raw_state_family,
+                "normalization_notes": normalization_notes,
                 "extraction_mode": extraction_mode,
                 "confidence": confidence,
             },
-            provenance=[_build_provenance(chunk, "relation", {"sentence": evidence_text, "reference_time": reference_time})],
+            provenance=[
+                _build_provenance(
+                    chunk,
+                    "relation",
+                    {
+                        "sentence": evidence_text,
+                        "reference_time": reference_time,
+                        "episode_id": episode.episode_id,
+                        "evidence_text": evidence_text,
+                    },
+                )
+            ],
         )
         graph.relations[edge_id] = edge
         active_relation_by_signature[signature] = edge_id
@@ -855,9 +923,17 @@ class TemporalGraphBuilder:
                 f"{', '.join(label_names) if label_names else 'local entities'} "
                 f"through {len(relation_ids)} temporal facts."
             )
+            keywords = sorted({name.lower() for name in label_names if name.strip()})
+            retrieval_text = " ".join(
+                ["community", *label_names, summary]
+            ).strip()
             communities[community_id] = CommunityNode(
                 community_id=community_id,
                 label="/".join(label_names) or community_id,
+                community_name=f"community_{component_index}",
+                keywords=keywords,
+                retrieval_text=retrieval_text,
+                local_summary=summary,
                 summary=summary,
                 entity_ids=sorted(component),
                 episode_ids=episode_ids,
@@ -920,14 +996,19 @@ class TemporalGraphBuilder:
                 f"through {len(episode_ids)} episodes and {len(relation_ids)} facts."
             )
             saga_id = f"saga_{index:03d}"
+            retrieval_text = " ".join(["saga", *label_parts, summary]).strip()
             sagas[saga_id] = SagaNode(
                 saga_id=saga_id,
                 label=" / ".join(label_parts) or f"chapters_{chapters[0]}_{chapters[-1]}",
+                arc_type="chapter_span_arc",
+                key_entities=label_parts,
+                retrieval_text=retrieval_text,
                 episode_ids=episode_ids,
                 entity_ids=dominant_entities,
                 relation_ids=relation_ids,
                 chapter_start=chapters[0],
                 chapter_end=chapters[-1],
+                chapter_range=(chapters[0], chapters[-1]),
                 summary=summary,
                 metadata={"chapter_count": len(chapters), "dominant_entities": dominant_entities},
                 provenance=[item for chapter_index in chapters for item in chapter_provenance[chapter_index][:2]],
@@ -1261,11 +1342,12 @@ class TemporalGraphBuilder:
             )
             if relation.status == "active":
                 active_relation_by_signature[relation.fact_signature] = relation.edge_id
-                state_key = _state_key(
-                    relation.state_family,
-                    relation.source_entity_id,
-                    relation.directionality,
-                    relation.target_entity_id,
+                state_key = build_state_slot(
+                    state_family=relation.state_family,
+                    source_entity_id=relation.source_entity_id,
+                    directionality=relation.directionality,
+                    target_entity_id=relation.target_entity_id,
+                    state_slot=relation.metadata.get("state_slot"),
                 )
                 if state_key:
                     active_state_relation_by_key[state_key] = relation.edge_id
@@ -1295,8 +1377,12 @@ class TemporalGraphBuilder:
             relation_version_counter[base_slug] = max(relation_version_counter.get(base_slug, 0), version)
             if edge.status == "active":
                 active_relation_by_signature[edge.fact_signature] = edge.edge_id
-                state_key = _state_key(
-                    edge.state_family, edge.source_entity_id, edge.directionality, edge.target_entity_id
+                state_key = build_state_slot(
+                    state_family=edge.state_family,
+                    source_entity_id=edge.source_entity_id,
+                    directionality=edge.directionality,
+                    target_entity_id=edge.target_entity_id,
+                    state_slot=edge.metadata.get("state_slot"),
                 )
                 if state_key:
                     active_state_relation_by_key[state_key] = edge.edge_id

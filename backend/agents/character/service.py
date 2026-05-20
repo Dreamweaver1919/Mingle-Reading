@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
-from functools import lru_cache
 from typing import Any
 
 from backend.api.schemas import (
@@ -17,93 +15,18 @@ from backend.api.schemas import (
 )
 from backend.agents.celebrity.model_client import invoke_openai_compatible_messages
 from backend.agents.celebrity.persona_service import (
-    PersonaAgentConfigurationError,
     PersonaAgentInvocationError,
     resolve_persona_runtime,
 )
 from backend.agents.celebrity.retrieval import retrieve_chunks
+from backend.knowledge_graph.orchestration.models import ReadingProgress
+from backend.knowledge_graph.orchestration.service import OrchestrationService
+from backend.knowledge_graph.storage import graph_exists, load_graph
 
 
 _CHARACTER_PROFILE_CACHE: dict[tuple[str, str, int], CharacterProfile] = {}
 _CHARACTER_CANDIDATE_CACHE: dict[tuple[str, int], list[CharacterCandidate]] = {}
 _INLINE_BUBBLE_CACHE: dict[tuple[str, int, tuple[str, ...], str, str], list[InlineBubble]] = {}
-
-_CHINESE_CHARACTER_STOPWORDS = {
-    "他说",
-    "她说",
-    "我说",
-    "你说",
-    "他们",
-    "她们",
-    "我们",
-    "你们",
-    "人们",
-    "大家",
-    "有人",
-    "没有",
-    "不是",
-    "不能",
-    "一个",
-    "一种",
-    "一些",
-    "这个",
-    "那个",
-    "这里",
-    "那里",
-    "这样",
-    "那样",
-    "现在",
-    "已经",
-    "仍然",
-    "依然",
-    "实际上",
-    "然而",
-    "因此",
-    "于是",
-    "因为",
-    "所以",
-    "但是",
-    "可是",
-    "如果",
-    "或者",
-    "并且",
-    "自己",
-    "时候",
-    "事情",
-    "东西",
-    "样子",
-    "地方",
-    "目录",
-    "封面",
-    "版权",
-    "注释",
-    "脚注",
-    "译本",
-    "互动百科",
-}
-
-_CHINESE_CHARACTER_SUFFIX_BLOCKLIST = (
-    "说道",
-    "说过",
-    "说着",
-    "说完",
-    "起来",
-    "下去",
-    "进去",
-    "出来",
-    "之外",
-    "之中",
-    "的话",
-)
-
-_CHINESE_CHARACTER_CONTAINS_BLOCKLIST = (
-    "目录",
-    "版本",
-    "脚注",
-    "注释",
-    "百科",
-    "出版",
-)
 
 
 def _extract_json_payload(text: str) -> Any:
@@ -123,80 +46,15 @@ def _extract_json_payload(text: str) -> Any:
 
 
 def _character_slug(name: str) -> str:
-    slug = re.sub("[^a-zA-Z0-9\u4e00-\u9fff]+", "-", name.lower()).strip("-")
+    slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff]+", "-", name.lower()).strip("-")
     return slug or "candidate"
 
 
-def _is_valid_character_name(name: str) -> bool:
-    normalized = re.sub(r"\s+", " ", name).strip(" ，。、“”\"'《》<>（）()[]")
-    if not normalized or len(normalized) <= 1:
-        return False
-    if re.search(r"[0-9]", normalized):
-        return False
-
-    if re.fullmatch(r"[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?", normalized):
-        return True
-
-    if not re.fullmatch(r"[\u4e00-\u9fff]{2,6}", normalized):
-        return False
-    if normalized in _CHINESE_CHARACTER_STOPWORDS:
-        return False
-    if normalized.startswith(("第", "这", "那", "其", "每", "某")):
-        return False
-    if normalized.endswith(("的人", "一样", "一般", "时候", "之后", "之前")):
-        return False
-    if any(normalized.endswith(suffix) for suffix in _CHINESE_CHARACTER_SUFFIX_BLOCKLIST):
-        return False
-    if any(token in normalized for token in _CHINESE_CHARACTER_CONTAINS_BLOCKLIST):
-        return False
-    return True
-
-
-def _sample_visible_chunks(chunks: list[BookChunk], current_chapter: int, limit: int = 60) -> list[BookChunk]:
-    visible = [chunk for chunk in chunks if chunk.chapter_index <= current_chapter]
-    if len(visible) <= limit:
-        return visible
-    step = max(1, len(visible) // limit)
-    sampled = visible[::step][:limit]
-    return sampled
-
-
-from backend.knowledge_graph.storage import graph_exists, load_graph
-
-
-def _graph_character_candidates(book, current_chapter: int, limit: int = 10) -> list[CharacterCandidate]:
-    """Return character candidates from the knowledge graph, falling back to empty list if no graph exists."""
-    if not graph_exists(book.book_id):
-        return []
-
-    try:
-        graph = load_graph(book.book_id)
-    except Exception:
-        return []
-
-    candidates: list[CharacterCandidate] = []
-    for entity in graph.entities.values():
-        if entity.entity_type != "character":
-            continue
-        if entity.first_seen_chapter > current_chapter:
-            continue
-        name = entity.canonical_name
-        if not name or not name.strip():
-            continue
-        chapter_span = entity.metadata.get("chapter_span", []) if entity.metadata else []
-        candidates.append(
-            CharacterCandidate(
-                character_id=f"char-{_character_slug(name)}",
-                character_name=name,
-                mention_count=entity.mention_count,
-                chapter_hits=sorted(chapter_span) if chapter_span else [entity.first_seen_chapter],
-                preview=entity.summary or f"{name}，从第{entity.first_seen_chapter}章到第{entity.last_seen_chapter}章出场{entity.mention_count}次。",
-            )
-        )
-    candidates.sort(key=lambda c: c.mention_count, reverse=True)
-    return candidates[:limit]
-
-def _build_model_messages(system_prompt: str, user_prompt: str, history: list[ChatMessage] | None = None) -> list[dict[str, str]]:
+def _build_model_messages(
+    system_prompt: str,
+    user_prompt: str,
+    history: list[ChatMessage] | None = None,
+) -> list[dict[str, str]]:
     messages = [{"role": "system", "content": system_prompt}]
     for turn in (history or [])[-8:]:
         messages.append({"role": turn.role, "content": turn.content})
@@ -204,7 +62,13 @@ def _build_model_messages(system_prompt: str, user_prompt: str, history: list[Ch
     return messages
 
 
-def _invoke_runtime(persona_id: str, messages: list[dict[str, str]], *, max_tokens: int = 900, temperature: float = 0.4) -> tuple[str, str]:
+def _invoke_runtime(
+    persona_id: str,
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int = 900,
+    temperature: float = 0.4,
+) -> tuple[str, str]:
     _, api_key, base_url, model_name = resolve_persona_runtime(persona_id)
     try:
         answer = invoke_openai_compatible_messages(
@@ -220,13 +84,41 @@ def _invoke_runtime(persona_id: str, messages: list[dict[str, str]], *, max_toke
     return answer, model_name
 
 
+def _graph_character_candidates(book, current_chapter: int, limit: int = 10) -> list[CharacterCandidate]:
+    if not graph_exists(book.book_id):
+        return []
+    try:
+        graph = load_graph(book.book_id)
+    except Exception:
+        return []
+
+    candidates: list[CharacterCandidate] = []
+    for entity in graph.entities.values():
+        if entity.entity_type != "character":
+            continue
+        if entity.first_seen_chapter > current_chapter:
+            continue
+        chapter_span = entity.metadata.get("chapter_span", []) if entity.metadata else []
+        preview = entity.summary or f"{entity.canonical_name} appears in visible chapters."
+        candidates.append(
+            CharacterCandidate(
+                character_id=f"char-{_character_slug(entity.canonical_name)}",
+                character_name=entity.canonical_name,
+                mention_count=entity.mention_count,
+                chapter_hits=sorted(chapter_span) if chapter_span else [entity.first_seen_chapter],
+                preview=preview,
+            )
+        )
+    candidates.sort(key=lambda item: item.mention_count, reverse=True)
+    return candidates[:limit]
+
+
 def list_character_candidates(book, current_chapter: int, limit: int = 10) -> list[CharacterCandidate]:
     cache_key = (book.book_id, current_chapter)
     if cache_key in _CHARACTER_CANDIDATE_CACHE:
         return _CHARACTER_CANDIDATE_CACHE[cache_key][:limit]
 
     candidates = _graph_character_candidates(book, current_chapter, limit=200)
-
     deduped: list[CharacterCandidate] = []
     seen: set[str] = set()
     for candidate in candidates:
@@ -237,10 +129,15 @@ def list_character_candidates(book, current_chapter: int, limit: int = 10) -> li
         deduped.append(candidate)
 
     _CHARACTER_CANDIDATE_CACHE[cache_key] = deduped
-    return deduped
+    return deduped[:limit]
 
 
-def _character_evidence(chunks: list[BookChunk], character_name: str, current_chapter: int, top_k: int = 8) -> list[BookChunk]:
+def _character_evidence(
+    chunks: list[BookChunk],
+    character_name: str,
+    current_chapter: int,
+    top_k: int = 8,
+) -> list[BookChunk]:
     visible = [chunk for chunk in chunks if chunk.chapter_index <= current_chapter]
     direct = [chunk for chunk in visible if character_name in chunk.text]
     if direct:
@@ -248,6 +145,91 @@ def _character_evidence(chunks: list[BookChunk], character_name: str, current_ch
     ranked = retrieve_chunks(visible, query=character_name, max_chapter=current_chapter, top_k=top_k)
     ranked_ids = {item.chunk_id for item in ranked}
     return [chunk for chunk in visible if chunk.chunk_id in ranked_ids][:top_k]
+
+
+def _orchestrate_character_context(
+    book,
+    character_name: str,
+    current_chapter: int,
+    query: str,
+    *,
+    top_k: int = 8,
+    window_mode: str = "visible",
+) -> dict[str, Any]:
+    try:
+        graph = load_graph(book.book_id)
+    except FileNotFoundError:
+        return {}
+
+    result = OrchestrationService().orchestrate(
+        chunks=book.chunks,
+        request_id=f"character-{book.book_id}-{_character_slug(character_name)}-{current_chapter}",
+        book_id=book.book_id,
+        query=query,
+        reading_progress=ReadingProgress(
+            book_id=book.book_id,
+            chapter_id=current_chapter,
+            paragraph_id=9999,
+            token_offset=10**9,
+        ),
+        selection_context=None,
+        top_k=top_k,
+        temporal_graph=graph,
+        window_mode=window_mode,
+    )
+    return result.structured_context or {}
+
+
+def _build_character_graph_block(structured_context: dict[str, Any] | None, character_name: str) -> str:
+    if not structured_context:
+        return ""
+
+    sections: list[str] = []
+
+    visible_facts = []
+    for item in structured_context.get("visible_facts", []):
+        source_name = str(item.get("source_name", ""))
+        target_name = str(item.get("target_name", ""))
+        if character_name not in source_name and character_name not in target_name:
+            continue
+        visible_facts.append(
+            f"- {source_name} --[{item.get('relation_type', '')}]--> {target_name} | {item.get('fact', '')}"
+        )
+        if len(visible_facts) >= 8:
+            break
+    if visible_facts:
+        sections.append("Visible facts:\n" + "\n".join(visible_facts))
+
+    entity_lines = []
+    for item in structured_context.get("entities", []):
+        name = str(item.get("name", ""))
+        if character_name not in name:
+            continue
+        entity_lines.append(f"- {name}: {item.get('summary', '')}")
+    if entity_lines:
+        sections.append("Character entities:\n" + "\n".join(entity_lines[:3]))
+
+    community_lines = []
+    for item in structured_context.get("local_communities", []):
+        members = ", ".join(item.get("members", []))
+        if character_name not in members:
+            continue
+        community_lines.append(f"- {item.get('label', '')}: {item.get('summary', '')}")
+    if community_lines:
+        sections.append("Local communities:\n" + "\n".join(community_lines[:3]))
+
+    arc_lines = []
+    for item in structured_context.get("long_arcs", []):
+        key_entities = ", ".join(item.get("key_entities", []))
+        if character_name not in key_entities:
+            continue
+        arc_lines.append(
+            f"- {item.get('label', '')} (chapter {item.get('chapter_start')} to {item.get('chapter_end')}): {item.get('summary', '')}"
+        )
+    if arc_lines:
+        sections.append("Visible arcs:\n" + "\n".join(arc_lines[:3]))
+
+    return "\n\n".join(sections)
 
 
 def generate_character_profile(book, character_name: str, current_chapter: int) -> CharacterProfile:
@@ -259,21 +241,31 @@ def generate_character_profile(book, character_name: str, current_chapter: int) 
     if not evidence_chunks:
         raise PersonaAgentInvocationError(f"character `{character_name}` has no visible evidence in current reading scope")
 
-    evidence_block = "\n\n".join(
-        [f"[{chunk.chunk_id} | 第 {chunk.chapter_index} 章]\n{chunk.text}" for chunk in evidence_chunks]
+    structured_context = _orchestrate_character_context(
+        book,
+        character_name,
+        current_chapter,
+        query=f"{character_name} 人物画像 关系 处境",
+        top_k=10,
+        window_mode="visible",
     )
+    graph_block = _build_character_graph_block(structured_context, character_name)
+    evidence_block = "\n\n".join(
+        f"[{chunk.chunk_id} | chapter {chunk.chapter_index}]\n{chunk.text}" for chunk in evidence_chunks
+    )
+
     system_prompt = (
-        "你是文学阅读系统里的角色画像生成助手。"
-        "请基于给定正文，为指定角色生成结构化角色画像。"
-        "只返回 JSON 对象，字段必须包含 summary, core_traits, relationships, signature_tension, current_scope。"
-        "relationships 是数组，每项包含 target 和 description。"
-        "不要使用未来剧情，不要补充当前证据之外的设定。"
+        "你是一个严格受阅读进度约束的人物分析助手。"
+        "只根据用户当前可见章节中的证据生成人物画像，不要使用未来剧情。"
+        "请输出 JSON，字段必须包含 summary, core_traits, relationships, signature_tension, current_scope。"
+        "relationships 必须是对象数组，每项包含 target 和 description。"
     )
     user_prompt = (
-        f"书名：{book.title}\n"
-        f"当前已读上限：第 {current_chapter} 章\n"
-        f"目标角色：{character_name}\n"
-        f"证据：\n{evidence_block}"
+        f"书名: {book.title}\n"
+        f"当前可见章节: {current_chapter}\n"
+        f"人物: {character_name}\n\n"
+        f"图谱上下文:\n{graph_block or '无'}\n\n"
+        f"正文证据:\n{evidence_block}"
     )
     answer, model_name = _invoke_runtime(
         "neutral",
@@ -330,23 +322,32 @@ def answer_as_character(
             evidence_chunks.append(match)
             seen.add(hit.chunk_id)
 
+    structured_context = _orchestrate_character_context(
+        book,
+        character_name,
+        current_chapter,
+        query=f"{character_name} {question}",
+        top_k=top_k,
+        window_mode="visible",
+    )
+    graph_block = _build_character_graph_block(structured_context, character_name)
     evidence_block = "\n\n".join(
-        [f"[{chunk.chunk_id} | 第 {chunk.chapter_index} 章]\n{chunk.text}" for chunk in evidence_chunks[:top_k]]
+        f"[{chunk.chunk_id} | chapter {chunk.chapter_index}]\n{chunk.text}" for chunk in evidence_chunks[:top_k]
     )
     system_prompt = (
-        f"你现在是阅读器里的角色 companion，围绕角色“{character_name}”与读者对话。"
-        "请保持角色视角和人物口吻，但不能越过当前已读范围。"
-        "如果证据不足，要坦白说明目前还不能确定。"
-        "不要扮演全知叙述者，不要提前透露未来剧情。"
+        f"你现在扮演 {character_name}。"
+        "你只能基于当前可见章节中的事实回答，不能泄露未来剧情，不能引用读者尚未看到的信息。"
+        "如果证据不足，可以保留、迟疑、模糊，但不要编造未来事实。"
     )
     user_prompt = (
-        f"书名：{book.title}\n"
-        f"当前已读上限：第 {current_chapter} 章\n"
-        f"角色画像：{profile.summary}\n"
-        f"角色特征：{', '.join(profile.core_traits)}\n"
-        f"关键张力：{profile.signature_tension}\n"
-        f"当前问题：{question}\n"
-        f"当前相关正文：\n{evidence_block}"
+        f"书名: {book.title}\n"
+        f"当前可见章节: {current_chapter}\n"
+        f"角色摘要: {profile.summary}\n"
+        f"核心特征: {', '.join(profile.core_traits)}\n"
+        f"核心张力: {profile.signature_tension}\n"
+        f"用户问题: {question}\n\n"
+        f"图谱上下文:\n{graph_block or '无'}\n\n"
+        f"正文证据:\n{evidence_block}"
     )
     answer, model_name = _invoke_runtime(
         "neutral",
@@ -381,28 +382,25 @@ def generate_inline_bubbles(
     if not visible_chunks:
         return []
 
-    evidence_block = "\n\n".join(
-        [f"[{chunk.chunk_id}]\n{chunk.text}" for chunk in visible_chunks[:8]]
-    )
+    evidence_block = "\n\n".join(f"[{chunk.chunk_id}]\n{chunk.text}" for chunk in visible_chunks[:8])
     if assistant_mode == "character" and character_name:
         runtime_persona = "neutral"
-        instruction = f"围绕角色“{character_name}”挑出最值得读者注意的词句。"
+        instruction = f"请以 {character_name} 的视角生成贴在文段旁边的短评气泡。"
     else:
         runtime_persona = persona_id
-        instruction = "从文学导读角度挑出最值得读者停留的词句。"
+        instruction = "请生成面向读者的短评气泡。"
 
     system_prompt = (
-        "你是阅读器里的 in-text bubble 生成助手。"
-        "请只返回 JSON 数组，每项包含 chunk_id, anchor_text, label, comment, emphasis。"
-        "anchor_text 必须是原文里的精确子串，comment 控制在 22 个字以内，label 控制在 6 个字以内。"
-        "不要返回当前页面之外的内容。"
+        "你是一个为阅读器生成行内批注气泡的助手。"
+        "请输出 JSON 数组，每项包含 chunk_id, anchor_text, label, comment, emphasis。"
+        "anchor_text 必须直接出现在对应 chunk 的正文中。label 最多 8 个字，comment 最多 40 个字。"
     )
     user_prompt = (
-        f"书名：{book.title}\n"
-        f"当前已读上限：第 {current_chapter} 章\n"
-        f"任务：{instruction}\n"
-        f"最多返回 {max_bubbles} 条注释。\n"
-        f"当前正文：\n{evidence_block}"
+        f"书名: {book.title}\n"
+        f"当前可见章节: {current_chapter}\n"
+        f"任务说明: {instruction}\n"
+        f"最多生成 {max_bubbles} 条。\n\n"
+        f"可见正文:\n{evidence_block}"
     )
     answer, _ = _invoke_runtime(
         runtime_persona,
@@ -428,7 +426,7 @@ def generate_inline_bubbles(
                     bubble_id=f"bubble-{chunk_id}-{index}",
                     chunk_id=chunk_id,
                     anchor_text=anchor_text,
-                    label=label or "注",
+                    label=label or "细读",
                     comment=comment,
                     emphasis=emphasis if emphasis in {"theme", "emotion", "relation", "foreshadow", "detail"} else "detail",
                 )
