@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any, Literal
 
@@ -92,6 +92,23 @@ class GuardrailTrace(BaseModel):
     retrieval_plan: list[str] = Field(default_factory=list)
     retrieval_counts: dict[str, int] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+
+
+class EntityNetworkResult(BaseModel):
+    """Complete ego-network for a single entity — all relations, neighbours, communities, sagas."""
+
+    entity_id: str
+    canonical_name: str
+    entity_type: str
+    mention_count: int
+    first_seen_chapter: int
+    last_seen_chapter: int
+    summary: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    neighbour_entities: list[dict[str, Any]] = Field(default_factory=list)
+    communities: list[dict[str, Any]] = Field(default_factory=list)
+    sagas: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class OrchestrationResult(BaseModel):

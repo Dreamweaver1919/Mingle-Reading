@@ -22,6 +22,7 @@ from backend.agents.celebrity.retrieval import retrieve_chunks
 from backend.knowledge_graph.orchestration.models import ReadingProgress
 from backend.knowledge_graph.orchestration.service import OrchestrationService
 from backend.knowledge_graph.storage import graph_exists, load_graph
+from backend.safety.anti_spoiler import is_spoiler_question
 
 
 _CHARACTER_PROFILE_CACHE: dict[tuple[str, str, int], CharacterProfile] = {}
@@ -46,7 +47,7 @@ def _extract_json_payload(text: str) -> Any:
 
 
 def _character_slug(name: str) -> str:
-    slug = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff]+", "-", name.lower()).strip("-")
+    slug = re.sub(r"[^a-zA-Z0-9一-鿿]+", "-", name.lower()).strip("-")
     return slug or "candidate"
 
 
@@ -79,7 +80,7 @@ def _invoke_runtime(
             max_tokens=max_tokens,
             temperature=temperature,
         )
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         raise PersonaAgentInvocationError(f"character service model call failed: {exc}") from exc
     return answer, model_name
 
@@ -147,87 +148,40 @@ def _character_evidence(
     return [chunk for chunk in visible if chunk.chunk_id in ranked_ids][:top_k]
 
 
-def _orchestrate_character_context(
-    book,
-    character_name: str,
-    current_chapter: int,
-    query: str,
-    *,
-    top_k: int = 8,
-    window_mode: str = "visible",
-) -> dict[str, Any]:
-    try:
-        graph = load_graph(book.book_id)
-    except FileNotFoundError:
-        return {}
-
-    result = OrchestrationService().orchestrate(
-        chunks=book.chunks,
-        request_id=f"character-{book.book_id}-{_character_slug(character_name)}-{current_chapter}",
-        book_id=book.book_id,
-        query=query,
-        reading_progress=ReadingProgress(
-            book_id=book.book_id,
-            chapter_id=current_chapter,
-            paragraph_id=9999,
-            token_offset=10**9,
-        ),
-        selection_context=None,
-        top_k=top_k,
-        temporal_graph=graph,
-        window_mode=window_mode,
-    )
-    return result.structured_context or {}
-
-
-def _build_character_graph_block(structured_context: dict[str, Any] | None, character_name: str) -> str:
-    if not structured_context:
+def _build_character_graph_block_from_network(network) -> str:
+    """Build a graph knowledge block from an EntityNetworkResult (entity-centric retrieval)."""
+    if network is None:
         return ""
 
     sections: list[str] = []
 
-    visible_facts = []
-    for item in structured_context.get("visible_facts", []):
-        source_name = str(item.get("source_name", ""))
-        target_name = str(item.get("target_name", ""))
-        if character_name not in source_name and character_name not in target_name:
-            continue
-        visible_facts.append(
-            f"- {source_name} --[{item.get('relation_type', '')}]--> {target_name} | {item.get('fact', '')}"
-        )
-        if len(visible_facts) >= 8:
-            break
-    if visible_facts:
-        sections.append("Visible facts:\n" + "\n".join(visible_facts))
+    if network.summary:
+        sections.append(f"Character profile: {network.summary}")
 
-    entity_lines = []
-    for item in structured_context.get("entities", []):
-        name = str(item.get("name", ""))
-        if character_name not in name:
-            continue
-        entity_lines.append(f"- {name}: {item.get('summary', '')}")
-    if entity_lines:
-        sections.append("Character entities:\n" + "\n".join(entity_lines[:3]))
+    fam = [r for r in network.relations if r["relation_type"] == "FAMILY_OF"]
+    if fam:
+        lines = [f"- {r['source_name']} --[FAMILY_OF]--> {r['target_name']} | {r['fact']}" for r in fam]
+        sections.append(f"Family relations ({len(fam)}):\n" + "\n".join(lines))
 
-    community_lines = []
-    for item in structured_context.get("local_communities", []):
-        members = ", ".join(item.get("members", []))
-        if character_name not in members:
-            continue
-        community_lines.append(f"- {item.get('label', '')}: {item.get('summary', '')}")
-    if community_lines:
-        sections.append("Local communities:\n" + "\n".join(community_lines[:3]))
+    inter = [r for r in network.relations if r["relation_type"] in ("SPOKE_WITH", "CARES_ABOUT", "CONFLICTS_WITH")]
+    if inter:
+        lines = [f"- {r['source_name']} --[{r['relation_type']}]--> {r['target_name']} | {r['fact']}" for r in inter[:12]]
+        sections.append(f"Interactions ({len(inter)}):\n" + "\n".join(lines))
 
-    arc_lines = []
-    for item in structured_context.get("long_arcs", []):
-        key_entities = ", ".join(item.get("key_entities", []))
-        if character_name not in key_entities:
-            continue
-        arc_lines.append(
-            f"- {item.get('label', '')} (chapter {item.get('chapter_start')} to {item.get('chapter_end')}): {item.get('summary', '')}"
-        )
-    if arc_lines:
-        sections.append("Visible arcs:\n" + "\n".join(arc_lines[:3]))
+    other = [r for r in network.relations if r not in fam and r not in inter]
+    if other:
+        lines = [f"- {r['source_name']} --[{r['relation_type']}]--> {r['target_name']} | {r['fact']}" for r in other[:5]]
+        sections.append(f"Other relations ({len(other)}):\n" + "\n".join(lines))
+
+    # Source text evidence (first 3 relations with source_text)
+    texts = [r for r in network.relations if r.get("source_text")]
+    if texts:
+        lines = [f"[ch{r['source_chapter']}] \"{r['source_text'][:200]}...\"" for r in texts[:3]]
+        sections.append(f"Source text evidence:\n" + "\n".join(lines))
+
+    if network.neighbour_entities:
+        lines = [f"- {n['canonical_name']} ({n['entity_type']}, mc={n['mention_count']})" for n in network.neighbour_entities[:8]]
+        sections.append(f"Related entities ({len(network.neighbour_entities)}):\n" + "\n".join(lines))
 
     return "\n\n".join(sections)
 
@@ -241,15 +195,16 @@ def generate_character_profile(book, character_name: str, current_chapter: int) 
     if not evidence_chunks:
         raise PersonaAgentInvocationError(f"character `{character_name}` has no visible evidence in current reading scope")
 
-    structured_context = _orchestrate_character_context(
-        book,
-        character_name,
-        current_chapter,
-        query=f"{character_name} 人物画像 关系 处境",
-        top_k=10,
-        window_mode="visible",
-    )
-    graph_block = _build_character_graph_block(structured_context, character_name)
+    # Entity-centric retrieval: pull the full ego-network
+    try:
+        graph = load_graph(book.book_id)
+        network = OrchestrationService().retrieve_entity_network(
+            graph, entity_name=character_name, max_chapter=current_chapter,
+        )
+    except Exception:
+        network = None
+
+    graph_block = _build_character_graph_block_from_network(network)
     evidence_block = "\n\n".join(
         f"[{chunk.chunk_id} | chapter {chunk.chapter_index}]\n{chunk.text}" for chunk in evidence_chunks
     )
@@ -305,6 +260,20 @@ def answer_as_character(
     conversation_history: list[ChatMessage] | None = None,
     top_k: int = 6,
 ) -> CharacterChatResponse:
+    safety = is_spoiler_question(question)
+    if not safety.safe:
+        return CharacterChatResponse(
+            answer="你的问题涉及未来剧情，已根据当前阅读进度为你过滤。请改问已读范围内的问题。",
+            character_name=character_name,
+            safe=False,
+            reason=safety.reason,
+            profile=CharacterProfile(
+                character_id=f"char-{_character_slug(character_name)}",
+                character_name=character_name,
+                summary="",
+            ),
+        )
+
     profile = generate_character_profile(book, character_name, current_chapter)
     evidence_chunks = _character_evidence(book.chunks, character_name, current_chapter, top_k=top_k)
     retrieval_hits = retrieve_chunks(
@@ -322,15 +291,16 @@ def answer_as_character(
             evidence_chunks.append(match)
             seen.add(hit.chunk_id)
 
-    structured_context = _orchestrate_character_context(
-        book,
-        character_name,
-        current_chapter,
-        query=f"{character_name} {question}",
-        top_k=top_k,
-        window_mode="visible",
-    )
-    graph_block = _build_character_graph_block(structured_context, character_name)
+    # Entity-centric retrieval with query for relation ordering
+    try:
+        graph = load_graph(book.book_id)
+        network = OrchestrationService().retrieve_entity_network(
+            graph, entity_name=character_name, query=question, max_chapter=current_chapter,
+        )
+    except Exception:
+        network = None
+
+    graph_block = _build_character_graph_block_from_network(network)
     evidence_block = "\n\n".join(
         f"[{chunk.chunk_id} | chapter {chunk.chapter_index}]\n{chunk.text}" for chunk in evidence_chunks[:top_k]
     )

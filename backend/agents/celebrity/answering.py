@@ -38,8 +38,6 @@ def _build_graph_knowledge_block(structured_context: dict | None) -> str:
     parts: list[str] = []
     visible_facts = structured_context.get("visible_facts", [])
     entities = structured_context.get("entities", [])
-    communities = structured_context.get("local_communities", [])
-    arcs = structured_context.get("long_arcs", [])
 
     if visible_facts:
         parts.append("【可见图谱事实】")
@@ -52,16 +50,6 @@ def _build_graph_knowledge_block(structured_context: dict | None) -> str:
         for item in entities[:8]:
             parts.append(
                 f"- {item.get('canonical_name')}（{item.get('entity_type')}）：{item.get('summary') or 'no summary'}"
-            )
-    if communities:
-        parts.append("【局部关系团簇】")
-        for item in communities[:4]:
-            parts.append(f"- {item.get('label')}：{item.get('summary')}")
-    if arcs:
-        parts.append("【长期叙事弧】")
-        for item in arcs[:4]:
-            parts.append(
-                f"- {item.get('label')}（ch{item.get('chapter_start')}-{item.get('chapter_end')}）：{item.get('summary')}"
             )
 
     if parts:

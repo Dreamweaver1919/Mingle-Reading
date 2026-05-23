@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from collections import Counter
 from typing import Any, Callable, Iterable, Literal
@@ -83,8 +83,6 @@ class ChapterTimelineEntry(BaseModel):
     relation_ids: list[str] = Field(default_factory=list)
     active_relation_ids: list[str] = Field(default_factory=list)
     invalidated_relation_ids: list[str] = Field(default_factory=list)
-    community_ids: list[str] = Field(default_factory=list)
-    saga_ids: list[str] = Field(default_factory=list)
     spoiler_level: int = 0
     paragraph_count: int = 0
     summary: str = ""
@@ -104,8 +102,6 @@ class ChapterNode(BaseModel):
     relation_ids: list[str] = Field(default_factory=list)
     active_relation_ids: list[str] = Field(default_factory=list)
     invalidated_relation_ids: list[str] = Field(default_factory=list)
-    community_ids: list[str] = Field(default_factory=list)
-    saga_ids: list[str] = Field(default_factory=list)
     spoiler_level: int = 0
     paragraph_count: int = 0
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -128,8 +124,8 @@ class EpisodeNode(BaseModel):
     tags: list[str] = Field(default_factory=list)
     entity_ids: list[str] = Field(default_factory=list)
     relation_ids: list[str] = Field(default_factory=list)
-    community_ids: list[str] = Field(default_factory=list)
-    saga_ids: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list)
+    depended_by: list[str] = Field(default_factory=list)
     prev_episode_id: str | None = None
     next_episode_id: str | None = None
     reference_time: str = ""

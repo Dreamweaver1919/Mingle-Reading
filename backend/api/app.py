@@ -81,8 +81,8 @@ def _upload_stage_percent(stage: str) -> int:
         "llm-request-failed": 56,
         "graph-episode-complete": 66,
         "chapter-consolidation": 76,
-        "graph-community-build": 84,
-        "graph-saga-build": 88,
+        "graph-dependency-build": 84,
+        "graph-finalize": 88,
         "graph-timeline-build": 92,
         "graph-build-finished": 95,
         "persist-book-record": 97,
@@ -170,14 +170,13 @@ def _process_upload_job(job_id: str, *, original_name: str, suffix: str, raw_byt
             job_id,
             stage="persist-graph-snapshot",
             title="Persisting graph snapshot",
-            message="Persisting the temporal graph snapshot, including relations, communities, and sagas.",
+            message="Persisting the temporal graph snapshot, including entities, relations, and dependency edges.",
             processed_snippets=len(record.chunks),
             total_snippets=len(record.chunks),
             details={
                 "entity_count": len(graph.entities),
                 "relation_count": len(graph.relations),
-                "community_count": len(graph.communities),
-                "saga_count": len(graph.sagas),
+                "dependency_edge_count": sum(len(ep.depends_on) for ep in graph.episodes.values()),
             },
         )
         save_graph(graph)
@@ -448,8 +447,8 @@ def graph_detail(book_id: str):
         "episodes": [episode.model_dump() for episode in graph.episodes.head(10)],
         "entities": [entity.model_dump() for entity in graph.entities.head(20)],
         "relations": [relation.model_dump() for relation in graph.relations.head(20)],
-        "communities": [community.model_dump() for community in graph.communities.head(10)],
-        "sagas": [saga.model_dump() for saga in graph.sagas.head(10)],
+        "communities": [],
+        "sagas": [],
     }
 
 
@@ -530,14 +529,13 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
     normalized_scope = scope.lower().strip()
     if normalized_scope not in {"chapter", "book"}:
         raise HTTPException(status_code=400, detail="invalid_graph_scope")
-    full_book_chapter = max((item.chapter_index for item in graph.chapter_timeline), default=chapter)
+    full_book_chapter = max((ch.chapter_index for ch in graph.chapters.values()), default=chapter)
     effective_chapter = full_book_chapter if normalized_scope == "book" else chapter
     max_paragraph = None if normalized_scope == "book" else (paragraph if paragraph and paragraph > 0 else None)
     min_chapter = from_chapter if from_chapter > 0 else 0
     chapter_key = f"chapter_{chapter:03d}"
     chapter_node = graph.chapters.get(chapter_key)
-    timeline_entry = next((item for item in graph.chapter_timeline if item.chapter_index == chapter), None)
-    if normalized_scope == "chapter" and chapter_node is None and timeline_entry is None:
+    if normalized_scope == "chapter" and chapter_node is None:
         raise HTTPException(status_code=404, detail="chapter_not_found")
 
     def _entity_is_visible(entity) -> bool:
@@ -556,17 +554,16 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
             for relation in graph.relations.values()
             if relation.is_visible(max_chapter=effective_chapter, max_paragraph=max_paragraph)
         ]
-        community_candidates = list(graph.communities.values())
+        community_candidates = []
     else:
-        chapter_entity_ids = list((timeline_entry.entity_ids if timeline_entry else chapter_node.entity_ids) if (timeline_entry or chapter_node) else [])
+        chapter_entity_ids = list(chapter_node.entity_ids) if chapter_node else []
         entity_pool = [
             graph.entities[entity_id]
             for entity_id in chapter_entity_ids
             if entity_id in graph.entities and _entity_is_visible(graph.entities[entity_id])
         ]
-        relation_ids = list((timeline_entry.relation_ids if timeline_entry else chapter_node.relation_ids) if (timeline_entry or chapter_node) else [])
-        community_ids = list((timeline_entry.community_ids if timeline_entry else chapter_node.community_ids) if (timeline_entry or chapter_node) else [])
-        community_candidates = [graph.communities[community_id] for community_id in community_ids if community_id in graph.communities]
+        relation_ids = list(chapter_node.relation_ids) if chapter_node else []
+        community_candidates = []
 
     entity_pool.sort(key=lambda item: item.mention_count, reverse=True)
     selected_entities = entity_pool[: max(6, limit)]
@@ -637,32 +634,7 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
         )
 
     community_items = []
-    community_candidates.sort(key=lambda item: (len(item.entity_ids), len(item.relation_ids)), reverse=True)
-    for community in community_candidates[:6]:
-        community_items.append(
-            {
-                "community_id": community.community_id,
-                "label": community.label,
-                "summary": community.summary,
-                "entity_count": len(community.entity_ids),
-                "relation_count": len(community.relation_ids),
-            }
-        )
-
     saga_items = []
-    for saga in graph.sagas.values():
-        if saga.chapter_end < min_chapter or saga.chapter_start > effective_chapter:
-            continue
-        saga_items.append({
-            "saga_id": saga.saga_id,
-            "label": saga.label or f"Saga {saga.saga_id}",
-            "summary": saga.summary or "",
-            "chapter_start": saga.chapter_start,
-            "chapter_end": saga.chapter_end,
-            "entity_count": len(saga.entity_ids),
-        })
-    saga_items.sort(key=lambda s: s["chapter_start"])
-
     return {
         "graph_id": graph.graph_id,
         "book_id": graph.book_id,
@@ -670,7 +642,7 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
         "scope": normalized_scope,
         "chapter_index": chapter if normalized_scope == "chapter" else effective_chapter,
         "paragraph_limit": max_paragraph,
-        "chapter_title": (timeline_entry.title if timeline_entry else chapter_node.title) if normalized_scope == "chapter" and (timeline_entry or chapter_node) else "Whole Book",
+        "chapter_title": chapter_node.title if normalized_scope == "chapter" and chapter_node else "Whole Book",
         "stats": {
             "node_count": len(nodes),
             "edge_count": len(edges),

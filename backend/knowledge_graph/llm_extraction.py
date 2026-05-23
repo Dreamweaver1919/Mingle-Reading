@@ -544,6 +544,141 @@ def _coerce_confidence(value: Any) -> float:
     return max(0.0, min(confidence, 1.0))
 
 
+def extract_window_graph_with_llm(
+    *,
+    runtime: GraphExtractorRuntime,
+    core_text: str,
+    prev_context_text: str,
+    chapter_index: int,
+    known_entities: list[KnownEntityCandidate],
+    family_tree_lines: list[str] | None = None,
+    timeout_seconds: int = 30,
+) -> EpisodeGraphExtraction:
+    system_prompt = _build_window_system_prompt(family_tree_lines or [])
+    user_prompt = _build_window_user_prompt(
+        core_text=core_text,
+        prev_context_text=prev_context_text,
+        chapter_index=chapter_index,
+        known_entities=known_entities,
+    )
+    latest_raw = ""
+    for attempt in range(1, 4):
+        raw = _invoke_with_response_format_fallback(
+            runtime=runtime,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout_seconds=timeout_seconds,
+            response_format=GRAPH_EXTRACTION_JSON_SCHEMA,
+        )
+        latest_raw = raw
+        payload = _parse_json_payload(raw)
+        if payload is None:
+            raw = _repair_non_json_output(
+                runtime=runtime,
+                invalid_output=raw,
+                timeout_seconds=timeout_seconds,
+            )
+            latest_raw = raw
+            payload = _parse_json_payload(raw)
+        if payload is not None:
+            extraction = EpisodeGraphExtraction(
+                entities=_coerce_entities(payload.get("entities", [])),
+                facts=_coerce_facts(payload.get("facts", [])),
+                extraction_mode="llm-assisted",
+                provider_label=runtime.provider_label,
+                raw_response=raw,
+            )
+            return extraction
+        if attempt < 3:
+            time.sleep(min(1.5, 0.35 * attempt))
+    raise ValueError(f"llm extraction returned non-JSON content: {_clip_text(latest_raw)}")
+
+
+def _build_window_system_prompt(family_tree_lines: list[str]) -> str:
+    honorific_rules = "\n".join(
+        [
+            "",
+            "【尊称与昵称规则——关键】",
+            "- “堂”“唐”是西班牙语 Don 的音译尊称，加在人名前面表示尊敬。",
+            "  “堂何塞·阿尔卡蒂奥·布恩迪亚” = “何塞·阿尔卡蒂奥·布恩迪亚”，是同一个人。",
+            "- “小”作为昵称前缀（如“小阿玛兰妲”），通常是同一人物的昵称变体，不是新角色。",
+            "- 去除了尊称/昵称前缀后的名字，优先与已知实体合并（在 resolution_hint 中说明）。",
+            "",
+            "【canonical_name 命名规范补充】",
+            "- 不要使用带尊称前缀的名字作为 canonical_name（用“阿波利纳尔·摩斯科特”而非“堂阿波利纳尔·摩斯科特”）。",
+        ]
+    )
+    base = _build_system_prompt()
+    base += honorific_rules
+    if family_tree_lines:
+        tree_section = "\n".join(
+            [
+                "",
+                "【已知人物族谱——供消歧参考】",
+                "以下是目前已建立的人物血缘/婚姻关系，帮助你判断新出现名字的归属：",
+                *[f"  {line}" for line in family_tree_lines],
+                "",
+                "注意：族谱中的关系可能不完整。如果文中出现与族谱矛盾的信息，以原文为准。",
+            ]
+        )
+        return base + tree_section
+    return base
+
+
+def _build_window_user_prompt(
+    *,
+    core_text: str,
+    prev_context_text: str,
+    chapter_index: int,
+    known_entities: list[KnownEntityCandidate],
+) -> str:
+    known_entity_lines = [
+        (
+            f"- {item.entity_id} | {item.canonical_name} | type={item.entity_type} "
+            f"| aliases={','.join(item.aliases[:5])} | mentions={item.mention_count} "
+            f"| last_seen=c{item.last_seen_chapter}/p{item.last_seen_paragraph}"
+        )
+        for item in known_entities[:30]
+    ]
+    parts: list[str] = [
+        f"当前章节: 第 {chapter_index} 章",
+        "",
+        "已知实体列表（已在上文中出现，供消歧参考）：",
+        "\n".join(known_entity_lines) if known_entity_lines else "- 无",
+    ]
+    if prev_context_text.strip():
+        parts.extend(
+            [
+                "",
+                "=== 前文上下文（仅用于人物消歧，不要从中提取实体/关系） ===",
+                prev_context_text,
+                "=== 上下文结束 ===",
+            ]
+        )
+    parts.extend(
+        [
+            "",
+            "=== 当前文本（需要从中提取实体和关系） ===",
+            core_text,
+            "=== 当前文本结束 ===",
+            "",
+            "抽取要求：",
+            "1. 仅从「当前文本」区域提取实体和关系。「前文上下文」仅用于辅助判断人物是否已存在。",
+            "2. 将同一实体的不同称呼归一化为稳定的 canonical_name（优先使用最完整的全名形式，去除堂/小等前缀）。",
+            "3. 若提及的人物已存在于已知实体列表，优先使用已有实体名，在 resolution_hint 中说明匹配理由。",
+            "4. aliases 只保留简短、精确的别名（昵称、简称），不要把亲属关系描述当作别名。",
+            "5. resolution_hint 字段必填——用一句话说明你是如何判断该实体与已知实体的关系：",
+            "   - 如果是已有实体：说明为什么确定为同一个人。",
+            "   - 如果是新实体：说明为什么判断为不同的人（年龄、世代、外貌、行为等差异）。",
+            "6. 忽略括号中的英文译名和英文脚注。",
+            "7. 只返回 JSON。",
+        ]
+    )
+    return "\n".join(parts)
+
+
 def _clip_text(text: str, limit: int = 280) -> str:
     compact = " ".join(text.split())
     if len(compact) <= limit:

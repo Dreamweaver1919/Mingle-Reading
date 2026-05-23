@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 import re
@@ -44,8 +44,6 @@ class TemporalGraphRetriever:
             "chapter": [],
             "entity": [],
             "relation": [],
-            "community": [],
-            "saga": [],
         }
         if not requested_node_types or "episode" in requested_node_types:
             search_results["episode"] = self._retrieve_episodes(
@@ -75,9 +73,9 @@ class TemporalGraphRetriever:
                 query_tokens,
             )
         if query.include_communities and (not requested_node_types or "community" in requested_node_types):
-            search_results["community"] = self._retrieve_communities(graph, query, supporting_episode_ids, query_tokens)
+            pass  # community layer removed — no-op
         if query.include_sagas and (not requested_node_types or "saga" in requested_node_types):
-            search_results["saga"] = self._retrieve_sagas(graph, query, supporting_episode_ids, query_tokens)
+            pass  # saga layer removed — no-op
 
         expansion_hits = self._graph_expand_hits(
             graph=graph,
@@ -248,8 +246,8 @@ class TemporalGraphRetriever:
             "episode": max(2, query.top_k // 2),
             "relation": 3,
             "entity": 3,
-            "community": 2,
-            "saga": 2,
+            "community": 0,  # removed
+            "saga": 0,  # removed
             "chapter": 2,
         }
         buckets: dict[str, list[GraphHit]] = {}
@@ -259,8 +257,6 @@ class TemporalGraphRetriever:
                 adjusted_score += 0.25
             elif hit.hit_type == "entity":
                 adjusted_score += 0.15
-            elif hit.hit_type in {"community", "saga"}:
-                adjusted_score += 0.05
             hit.score = round(adjusted_score, 4)
             buckets.setdefault(hit.hit_type, []).append(hit)
 
@@ -275,8 +271,6 @@ class TemporalGraphRetriever:
     def _construct_context(self, graph: TemporalContextGraph, hits: list[GraphHit]) -> dict[str, Any]:
         visible_facts: list[dict[str, Any]] = []
         entities: list[dict[str, Any]] = []
-        communities: list[dict[str, Any]] = []
-        sagas: list[dict[str, Any]] = []
         citations: list[dict[str, Any]] = []
 
         for hit in hits:
@@ -319,31 +313,12 @@ class TemporalGraphRetriever:
                         "provenance": [item.model_dump() for item in hit.provenance],
                     }
                 )
-            elif hit.hit_type == "community":
-                communities.append(
-                    {
-                        "community_id": hit.hit_id,
-                        "label": hit.payload.get("label"),
-                        "summary": hit.payload.get("summary"),
-                        "entity_ids": hit.payload.get("entity_ids", []),
-                    }
-                )
-            elif hit.hit_type == "saga":
-                sagas.append(
-                    {
-                        "saga_id": hit.hit_id,
-                        "label": hit.payload.get("label"),
-                        "summary": hit.payload.get("summary"),
-                        "chapter_start": hit.payload.get("chapter_start"),
-                        "chapter_end": hit.payload.get("chapter_end"),
-                    }
-                )
 
         return {
             "visible_facts": visible_facts[:8],
             "entities": entities[:6],
-            "local_communities": communities[:4],
-            "long_arcs": sagas[:4],
+            "local_communities": [],
+            "long_arcs": [],
             "citations": citations[:10],
         }
 

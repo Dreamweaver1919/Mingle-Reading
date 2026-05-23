@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
@@ -8,6 +8,7 @@ from backend.knowledge_graph.retrieval import TemporalGraphRetriever
 
 from .models import (
     Citation,
+    EntityNetworkResult,
     GuardrailTrace,
     OrchestrationResult,
     ReadingProgress,
@@ -77,6 +78,155 @@ class OrchestrationService:
             guardrail_trace=trace,
             retrieval_trace=graph_trace,
             structured_context=structured_graph_context,
+        )
+
+    def retrieve_entity_network(
+        self,
+        graph: TemporalContextGraph,
+        *,
+        entity_name: str | None = None,
+        entity_id: str | None = None,
+        query: str | None = None,
+        max_chapter: int | None = None,
+    ) -> EntityNetworkResult | None:
+        """Retrieve the complete ego-network for a single entity.
+
+        Unlike orchestrate() which ranks/re-ranks across all nodes, this pulls
+        ALL relations, neighbours, communities, and sagas for one entity.
+        The query is only used to sort relations within the result, not to filter.
+        """
+        from backend.knowledge_graph.retrieval import _text_score, _tokenize
+
+        # --- 1. Find the entity ---
+        target_entity = None
+        if entity_id:
+            target_entity = graph.entities.get(entity_id)
+        if target_entity is None and entity_name:
+            candidates = []
+            for e in graph.entities.values():
+                if e.entity_type != "character":
+                    continue
+                if entity_name in e.canonical_name:
+                    candidates.append(e)
+            if candidates:
+                target_entity = max(candidates, key=lambda e: e.mention_count)
+        if target_entity is None:
+            return None
+
+        eid = target_entity.entity_id
+
+        # --- 2. All relations involving this entity ---
+        query_tokens = _tokenize(query) if query else []
+        relations: list[dict[str, Any]] = []
+        for r in graph.relations.values():
+            if r.source_entity_id != eid and r.target_entity_id != eid:
+                continue
+            if max_chapter is not None and r.valid_at_chapter > max_chapter:
+                continue
+            src = graph.entities.get(r.source_entity_id)
+            tgt = graph.entities.get(r.target_entity_id)
+            if src is None or tgt is None:
+                continue
+            item = {
+                "source_name": src.canonical_name,
+                "target_name": tgt.canonical_name,
+                "relation_type": r.relation_type,
+                "state_family": r.state_family,
+                "fact": r.fact,
+                "status": r.status,
+                "valid_at_chapter": r.valid_at_chapter,
+                "weight": r.weight,
+            }
+            # Include source text excerpt for evidence
+            if r.episode_ids:
+                first_ep = graph.episodes.get(r.episode_ids[0])
+                if first_ep and first_ep.text:
+                    item["source_text"] = first_ep.text[:300]
+                    item["source_chapter"] = first_ep.chapter_index
+            # Score for ordering (query only affects rank, not inclusion)
+            if query_tokens:
+                item["_score"] = _text_score(
+                    query_tokens,
+                    f"{src.canonical_name} {tgt.canonical_name} {r.relation_type} {r.fact}",
+                )
+            else:
+                item["_score"] = 0.0
+            relations.append(item)
+
+        # Sort: FAMILY_OF first, then by query score, then by chapter
+        type_priority = {"FAMILY_OF": 0, "CARES_ABOUT": 1, "SPOKE_WITH": 2, "CONFLICTS_WITH": 3,
+                         "LOCATED_IN": 4, "ACCOMPANIES": 5, "MEMBER_OF": 6, "OWNS": 7}
+        relations.sort(key=lambda r: (
+            type_priority.get(r["relation_type"], 9),
+            -(r.get("_score", 0)),
+            r["valid_at_chapter"],
+        ))
+
+        # --- 3. Neighbour entities ---
+        neighbour_ids: set[str] = set()
+        for r in graph.relations.values():
+            if r.source_entity_id == eid:
+                neighbour_ids.add(r.target_entity_id)
+            elif r.target_entity_id == eid:
+                neighbour_ids.add(r.source_entity_id)
+
+        neighbours: list[dict[str, Any]] = []
+        for nid in neighbour_ids:
+            ne = graph.entities.get(nid)
+            if ne is None:
+                continue
+            if max_chapter is not None and ne.first_seen_chapter > max_chapter:
+                continue
+            neighbours.append({
+                "entity_id": ne.entity_id,
+                "canonical_name": ne.canonical_name,
+                "entity_type": ne.entity_type,
+                "mention_count": ne.mention_count,
+                "first_seen_chapter": ne.first_seen_chapter,
+                "summary": ne.summary or "",
+            })
+        neighbours.sort(key=lambda n: -n["mention_count"])
+
+        # --- 4. Communities containing this entity ---
+        communities: list[dict[str, Any]] = []
+        for c in graph.communities.values():
+            if eid in c.entity_ids:
+                if max_chapter is not None and c.chapter_start > max_chapter:
+                    continue
+                communities.append({
+                    "label": c.label,
+                    "summary": c.summary,
+                    "chapter_start": c.chapter_start,
+                    "chapter_end": c.chapter_end,
+                    "entity_count": len(c.entity_ids),
+                })
+
+        # --- 5. Sagas mentioning this entity ---
+        sagas: list[dict[str, Any]] = []
+        for s in graph.sagas.values():
+            if eid in s.key_entities:
+                if max_chapter is not None and s.chapter_start > max_chapter:
+                    continue
+                sagas.append({
+                    "label": s.label,
+                    "summary": s.summary,
+                    "chapter_start": s.chapter_start,
+                    "chapter_end": s.chapter_end,
+                })
+
+        return EntityNetworkResult(
+            entity_id=eid,
+            canonical_name=target_entity.canonical_name,
+            entity_type=target_entity.entity_type,
+            mention_count=target_entity.mention_count,
+            first_seen_chapter=target_entity.first_seen_chapter,
+            last_seen_chapter=target_entity.last_seen_chapter,
+            summary=target_entity.summary or "",
+            aliases=list(target_entity.aliases),
+            relations=relations,
+            neighbour_entities=neighbours,
+            communities=communities,
+            sagas=sagas,
         )
 
     def _coerce_progress(
