@@ -1,261 +1,159 @@
 # Mingle Reading
 
-Mingle Reading 是一个面向长文本的 AI 阅读工作空间。它将可上传的书籍文本、进度感知检索、内联高亮问答、章节摘要、轻量级角色引导式陪伴阅读以及防剧透控制整合为一个可本地运行的 MVP，并可作为开源项目进行扩展。
-
-本仓库是该构想的当前工程骨架。其核心原则是：先跑通阅读闭环，再通过更好的数据集、更丰富的时间图、更强的角色一致性以及更完整的评测来深化智能。
-
-## 项目目标
-
-- 将上传的阅读文本转化为结构化、可检索的阅读语料库。
-- 支持沉浸式阅读，提供段落级导航和阅读进度追踪。
-- 从用户高亮文本中回答问题，且不泄露未来剧情。
-- 根据当前阅读进度生成章节级摘要。
-- 支持角色引导式陪伴阅读，作为可插拔层。
-- 围绕检索、防剧透行为和阅读理解构建数据集与评测流水线。
-
-## 核心功能
-
-- 支持 `.txt`、`.pdf` 和 `.epub` 文件的文本上传与本地书籍导入。
-- 章节与段落解析，附带 chunk 级元数据。
-- 基于上传书籍内容生成时间图。
-- 阅读器 UI：章节导航、段落选择、内容预览。
-- 高亮触发式问答，带进度感知检索。
-- 章节摘要端点，支持角色感知生成。
-- 完整的运行时路径：通过角色 RAG 加 OpenAI 兼容模型端点，支持鲁迅、马克·吐温和张爱玲三位领读 Agent。
-- 基准测试数据：`highlight_qa`、`anti_spoiler`、`chapter_summary`。
+Mingle Reading 是一个面向长篇文学作品的 AI 伴读系统。它将书籍文本转化为结构化时态知识图谱，支持章节感知的问答、角色扮演对话、名家领读以及防剧透保护。
 
 ## 系统架构
 
-Mingle Reading 目前包含四个协作层：
-
-1. `前端交互层`
-   [frontend](/C:/Users/21358/Desktop/MingleReading/frontend) 中的静态 Web 阅读器处理上传、章节导航、段落选择、摘要触发和提问提交。
-
-2. `应用与编排层`
-   [backend/api/app.py](/C:/Users/21358/Desktop/MingleReading/backend/api/app.py) 中的 FastAPI 应用暴露了上传、书籍、角色、问答、编排、摘要和图谱等端点。
-
-3. `知识与检索层`
-   后端从上传文本中构建归一化的书籍记录、检索 chunk 和时间上下文图。检索是进度感知的，并设计为在生成回答之前支持防剧透过滤。
-
-4. `数据集与评测层`
-   仓库包含 schema、清单（manifest）、示例、基准测试数据和评测脚本，以便对导入、问答、摘要和防剧透行为进行回归测试，并可扩展为更完备的基准测试套件。
-
-### 当前运行时流程
-
-```text
-上传文本
-  -> 归一化为书籍记录
-  -> 解析章节和段落
-  -> 构建检索 chunk
-  -> 构建时间图
-  -> 在前端阅读
-  -> 提出高亮问题或请求章节摘要
-  -> 仅检索可见上下文
-  -> 以角色风格生成回答，附带防剧透保护
+```
+┌──────────────────────────────────────────────────────┐
+│                    前端阅读器                         │
+│  index.html  ·  graph.html (3D 图谱)  ·  app.js      │
+├──────────────────────────────────────────────────────┤
+│                    Agent 层                           │
+│  Celebrity Agent (名家伴读 QA)                        │
+│  Character Agent (角色扮演对话)                        │
+│  Inline Bubbles (行内批注)                            │
+├──────────────────────────────────────────────────────┤
+│                  知识图谱层                            │
+│  Chapter → Episode → Entity → Relation (四层精简)     │
+│  叙事依赖边 · 时间追踪 · 实体消歧                      │
+├──────────────────────────────────────────────────────┤
+│                 数据管道层                             │
+│  TXT/PDF/EPUB 解析 → 章节分割 → 滑动窗口 → LLM 提取   │
+└──────────────────────────────────────────────────────┘
 ```
 
-## 数据集构建策略
+### 知识图谱结构
 
-仓库采用 schema 优先、元数据优先的结构，而非打包大型受版权保护的语料。
+四层精简架构，Community / Saga / ChapterTimeline 已移除：
 
-### 数据分类
+| 层 | 节点类型 | 数量(百年孤独) | 说明 |
+|------|---------|:--:|------|
+| Chapter | 章节容器 | 23 | 汇总本章实体和关系，携带剧透等级 |
+| Episode | 叙事节拍 | 838 | LLM 提取结果容器，携带依赖边 |
+| Entity | 实体 | ~340 | 人物/地点/物品/团体/概念 |
+| Relation | 关系 | ~800 | 9 种关系类型，带时间戳和原文引用 |
 
-- `书籍文本语料`
-  用户上传的文本、演示文本，以及未来的公版或授权书籍。
-- `角色源语料`
-  用于塑造领读 Agent 的资料，如论文、信件、演讲、序言、传记和评论。
-- `标注数据`
-  `highlight_qa`、`chapter_evolution`、显著性标签，以及未来的阅读会话标注。
-- `评测数据`
-  检索、角色一致性、防剧透以及面向用户研究的评测包。
+实体间通过 2,500+ 条叙事依赖边连接，支持跨章节因果追溯。
 
-### 当前数据布局
+### Agent 工作流
 
-```text
-backend/assets/data/
-  raw/
-    books/
-    persona_sources/
-  processed/
-    books/
-    personas/
-  annotations/
-    highlight_qa/
-    chapter_evolution/
-  eval/
-    retrieval/
-    persona_consistency/
-    anti_spoiler/
-  manifests/
-```
+**Celebrity Agent (QA)**：用户提问 → 剧透检测 → 混合检索（文本关键词 + 图谱多路并行）→ 图谱知识格式化 → 名家风格注入（鲁迅/马克吐温）→ LLM 回复
 
-### 分层文本表示
+**Character Agent (角色扮演)**：用户提问 → 剧透检测 → 实体中心检索（直接定位角色，拉取全部关系和邻居）→ 角色画像生成 → 分组格式化（血缘/互动/原文证据）→ LLM 以第一人称回复
 
-当前项目为上传的书籍文本保留了一个层级化表示：
+## 核心功能
 
-- `L0`：原始段落单元
-- `L1`：检索就绪的 chunk
-- `L2`：章节结构摘要
-- `L3`：全局主题或路径索引
-- `L4`：引用、立场或评论就绪层
-
-此层级的首次实际应用已存在于本地数据集构建脚本和图谱导出流水线中。
+- 支持 `.txt`、`.pdf` 和 `.epub` 文件上传
+- 从文本自动构建时态知识图谱（增量构建 + 断点恢复）
+- 3D 知识图谱可视化（`graph.html`），支持节点/边过滤
+- 进度感知的问答和角色对话，严格防剧透
+- 名家伴读模式：鲁迅、马克·吐温、张爱玲
+- 角色扮演模式：选择任意角色进行第一人称对话
+- 行内批注气泡（Persona 模式 / Character 模式）
+- 全文检索、章节导航、段落级阅读进度
 
 ## 快速开始
 
 ### 环境要求
 
-- 推荐 Python `3.10+`
-- `pip`
+- Python 3.10+
+- pip
 
 ### 安装
 
 ```bash
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-### 配置角色 Agent
+### 配置
 
-要使用 `lu-xun`、`mark-twain` 或 `zhang-ailing`，请将 [`.env.example`](/C:/Users/21358/Desktop/MingleReading/.env.example) 复制为 `.env`，并为每个 Agent 填入你自己的 OpenAI 兼容端点、模型名称和 API key。应用启动时会自动加载此根目录下的 `.env` 文件。
+将 `.env.example` 复制为 `.env`，配置 LLM API 端点：
 
-### 运行 API 和阅读器
+```env
+GRAPHITI_EXTRACTOR_API_KEY=your_key
+GRAPHITI_EXTRACTOR_BASE_URL=https://api.deepseek.com
+GRAPHITI_EXTRACTOR_MODEL_NAME=deepseek-v4-flash
+
+MUSE_NEUTRAL_API_KEY=your_key
+MUSE_NEUTRAL_BASE_URL=https://api.deepseek.com
+MUSE_NEUTRAL_MODEL_NAME=deepseek-v4-flash
+
+LU_XUN_API_KEY=your_key
+LU_XUN_BASE_URL=https://api.deepseek.com
+LU_XUN_MODEL_NAME=deepseek-v4-flash
+```
+
+### 启动
 
 ```bash
-uvicorn backend.api.app:app --reload
+python main.py
 ```
 
-然后打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)。
+打开 [http://127.0.0.1:8000](http://127.0.0.1:8000)。
 
-启动时，如果 [backend/assets/examples/mingle_demo_book.txt](/C:/Users/21358/Desktop/MingleReading/backend/assets/examples/mingle_demo_book.txt) 存在，应用会自动加载该内置演示书籍。
-
-## 前端使用
-
-阅读器 UI 由 FastAPI 直接从 [frontend/index.html](/C:/Users/21358/Desktop/MingleReading/frontend/index.html) 提供服务。
-
-当前 UI 能力：
-
-- 上传 `.txt`、`.pdf` 或 `.epub` 书籍
-- 浏览章节和段落内容
-- 选中段落作为阅读焦点
-- 查看 `reading_progress` 和 `selection_context`
-- 从当前阅读上下文提问
-- 请求章节摘要
-- 从本地角色注册表中切换角色
-
-截图占位：
-
-- 公开发布前，在 `backend/docs/` 或专用的 `screenshots/` 目录下添加截图。
+上传 EPUB 后自动构建知识图谱并接入所有 Agent 功能。构建进度在前端实时可见。
 
 ## API 概览
 
-[backend/api/app.py](/C:/Users/21358/Desktop/MingleReading/backend/api/app.py) 当前暴露的端点：
-
-- `GET /api/health`
-- `GET /api/books`
-- `GET /api/books/{book_id}`
-- `GET /api/books/{book_id}/graph`
-- `GET /api/personas`
-- `POST /api/upload`
-- `POST /api/qa`
-- `POST /api/orchestrate`
-- `POST /api/summary`
-
-### API 简要说明
-
-- `POST /api/upload`
-  上传 `.txt`、`.pdf` 或 `.epub` 文件，解析为书籍记录并构建时间图。
-- `POST /api/qa`
-  接收 `book_id`、`question`，可选参数 `highlight_text`、`current_chapter`、`persona_id`。
-- `POST /api/orchestrate`
-  在可见 chunk 和图谱上下文中运行混合检索。
-- `POST /api/summary`
-  生成当前章节的摘要，可选角色风格。
+| 端点 | 说明 |
+|------|------|
+| `GET /api/books` | 列出可用书籍 |
+| `GET /api/books/{id}` | 书籍详情 |
+| `POST /api/upload` | 上传 TXT/PDF/EPUB |
+| `POST /api/qa` | 名家伴读 QA |
+| `POST /api/books/{id}/characters/chat` | 角色对话 |
+| `POST /api/books/{id}/characters/profile` | 角色画像 |
+| `GET /api/books/{id}/characters/candidates` | 可对话角色列表 |
+| `POST /api/books/{id}/inline-bubbles` | 行内批注气泡 |
+| `POST /api/books/{id}/graph/query` | 图谱查询 |
+| `GET /api/books/{id}/graph/view` | 图谱可视化数据 |
 
 ## 仓库结构
 
 ```text
-architecture/        接口与系统设计说明
-backend/             后端应用、数据、知识库、安全与 LLM 记忆模块
-backend/benchmarks/          用于冒烟评测的基准测试数据
-backend/assets/data/                原始、处理后、标注、评测和清单资产
-backend/docs/                架构与数据设计文档
-eval/                评测运行器
-backend/assets/examples/            演示阅读文本
-frontend/            静态阅读器 UI 和浏览器端资源
-backend/assets/schemas/             JSON schema 定义
-backend/scripts/             数据集与注册表构建脚本
-backend/workspace_state/     本地运行时产物，如已保存的书籍和图谱
-```
-
-### 后端模块布局
-
-```text
 backend/
-  api/               FastAPI 端点和应用接线
-  common/            共享配置和 Pydantic 模型
-  backend/assets/data/              数据导入和本地持久化
-  knowledge_base/    图谱、问答检索和角色模块
-  safety/            防剧透保护
-  llm_memory/        角色、编排和摘要生成
+  api/                    FastAPI 端点和请求模型
+  agents/                 Agent 实现
+    celebrity/            名家伴读 (answering + persona RAG + retrieval)
+    character/            角色对话 (profile + chat + inline bubbles)
+  knowledge_graph/        知识图谱核心
+    builder.py            图谱构建器 (滑动窗口 + 增量实体解析)
+    models.py             四层数据模型 (Chapter/Episode/Entity/Relation)
+    retrieval.py          图谱检索器 (评分 + 重排 + BFS 扩展)
+    llm_extraction.py     LLM 提取提示词 (CoT 消歧 + 描述缓存)
+    extraction_window.py  滑动窗口构建器 (前导上下文 + 窗口分块)
+    orchestration/        混合检索编排 (EntityNetworkResult + OrchestrationService)
+  data_pipeline/          文本解析 (TXT/PDF/EPUB) + 书籍/图谱存储
+  safety/                 防剧透检测
+  config.py               路径和 .env 加载
+frontend/
+  index.html              阅读器 UI
+  graph.html               3D 知识图谱可视化 (Three.js)
+  app.js                   前端逻辑
+  main.css                 样式
 ```
+
+## 构建知识图谱
+
+```bash
+# 全量构建
+python rebuild_experiment.py --method 2
+
+# 完成后比较不同配置
+python compare_methods.py
+```
+
+图谱保存在 `backend/runtime/graphs/{book_id}.graph.json`，支持增量续建和断点恢复。
 
 ## 评测
-
-当前仓库包含一个最小但可运行的评测框架。
-
-### 运行基准测试
 
 ```bash
 python backend/eval/run_eval.py
 ```
 
-### 运行测试
+覆盖 `highlight_qa`、`anti_spoiler`、`chapter_summary` 三类基准测试。
 
-```bash
-```
+## 开源说明
 
-### 当前覆盖内容
-
-- `highlight_qa`
-  检查是否检索到预期的支撑 chunk 并返回答案。
-- `anti_spoiler`
-  检查未来剧情问题是否被拒绝或正确约束。
-- `chapter_summary`
-  检查摘要是否包含预期短语并避免禁止短语。
-
-目前这些属于冒烟和回归检查，尚不是完整的排行榜级基准测试。
-
-## 当前局限
-
-- `pdf` 支持目前期望 PDF 包含可选文本层，而非扫描版图片 PDF。
-- 时间图提取是启发式且轻量级的。
-- 前端文案在多处包含占位或草稿文本。
-- 角色输出依赖 `.env` 中本地配置的模型凭证。
-- 评测规模仍然较小且偏合成，与目标基准测试范围有差距。
-- 受版权保护的语料主要通过清单和示例呈现，而非完整的已发布文本。
-
-## 路线图
-
-- 为 `epub`、`docx` 和受控 `pdf` 工作流增加更丰富的导入功能。
-- 强化时间图提取和图谱感知检索。
-- 扩展中文领读角色和角色一致性评测。
-- 构建更大规模的检索、叙事理解、长对话和防剧透基准测试。
-- 添加截图资源、部署说明和公开发布打包。
-- 改进前端文本质量，打磨阅读交互闭环。
-
-## 开源发布说明
-
-本仓库的结构设计为可安全开源：
-
-- schema、清单、示例和脚本已包含在内
-- 基准测试数据量小且为合成数据
-- 受版权保护的书籍内容应保持在公开发布之外，除非具备明确的再分发权利
-- 公版或授权内容可通过现有数据结构后续添加
-
-## 相关项目文档
-
-- [架构对齐](/C:/Users/21358/Desktop/MingleReading/backend/docs/architecture_alignment.md)
-- [README 架构摘要](/C:/Users/21358/Desktop/MingleReading/backend/docs/readme_architecture_summary.md)
-- [数据设计](/C:/Users/21358/Desktop/MingleReading/backend/docs/data/mingle_reading_data_design.md)
-- [基准测试 README](/C:/Users/21358/Desktop/MingleReading/backend/benchmarks/README.md)
-- [数据骨架 README](/C:/Users/21358/Desktop/MingleReading/backend/assets/data/README.md)
+本仓库按可安全开源的结构组织：schema、示例、脚本和合成评测数据已包含；受版权保护的书籍内容保留在公开发布之外。

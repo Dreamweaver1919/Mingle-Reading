@@ -381,8 +381,6 @@ class TemporalGraphRetriever:
                         "chunk_id": episode.chunk_id,
                         "entities": episode.entity_ids,
                         "tags": episode.tags,
-                        "community_ids": episode.community_ids,
-                        "saga_ids": episode.saga_ids,
                         "spoiler_level": episode.spoiler_level,
                         "paragraph_id": episode.paragraph_index,
                         "reference_time": episode.reference_time,

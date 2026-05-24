@@ -524,7 +524,7 @@ def graph_audit(book_id: str, relation_id: str | None = None, entity_id: str | N
 
 @app.get("/api/books/{book_id}/graph/view")
 def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 18, scope: str = "chapter",
-               from_chapter: int = 0):
+               from_chapter: int = 0, min_weight: float = 0.0, max_edges: int = 0):
     graph = get_or_build_graph(book_id)
     normalized_scope = scope.lower().strip()
     if normalized_scope not in {"chapter", "book"}:
@@ -613,6 +613,14 @@ def graph_view(book_id: str, chapter: int = 1, paragraph: int = 0, limit: int = 
                 "summary": entity.summary,
             }
         )
+
+    # Edge weight threshold
+    if min_weight > 0.0:
+        relation_pool = [r for r in relation_pool if r.weight >= min_weight]
+    # Max edges limit
+    if max_edges > 0 and len(relation_pool) > max_edges:
+        relation_pool.sort(key=lambda r: r.weight, reverse=True)
+        relation_pool = relation_pool[:max_edges]
 
     edges = []
     for relation in relation_pool:

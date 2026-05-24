@@ -112,6 +112,8 @@ class KnownEntityCandidate(BaseModel):
     mention_count: int = 0
     last_seen_chapter: int = 0
     last_seen_paragraph: int = 0
+    summary: str = ""
+    generation: int = 0
 
 
 class ExtractedEntityCandidate(BaseModel):
@@ -243,6 +245,13 @@ def _build_system_prompt() -> str:
             "  如果与已知角色的描述矛盾，则是不同的人。",
             "信号5【角色/行为】：不同角色有不同的职业、行为模式、社会关系。",
             "  例如“炼金术士”“斗鸡场常客”“远征的士兵”描述的是不同的人。",
+            "",
+            "【消歧推理步骤】",
+            "在判断当前段落中的某个角色是否与已知实体为同一人时，请按以下步骤推理：",
+            "步骤1【特征提取】：列出此人在当前文本中的关键特征——年龄描述、具体行为、亲属称谓、外貌描写。",
+            "步骤2【对照排查】：将上述特征逐一对照已知实体列表中的每个同名或相似实体。",
+            "步骤3【排除不可能】：若已知实体在年龄/世代/行为/亲属关系方面与当前特征矛盾，则排除。",
+            "步骤4【结论判断】：若排除所有已知实体后无法匹配，创建新实体（宁分不合）；若恰有一个匹配且无矛盾，使用已有实体名并在 resolution_hint 中说明理由。",
             "",
             "【canonical_name 命名规范】",
             "- 优先使用全名（如“何塞·阿尔卡蒂奥·布恩迪亚”而非“何塞·阿尔卡蒂奥”），全名更具区分度。",
@@ -552,9 +561,13 @@ def extract_window_graph_with_llm(
     chapter_index: int,
     known_entities: list[KnownEntityCandidate],
     family_tree_lines: list[str] | None = None,
+    character_descriptions: list[str] | None = None,
     timeout_seconds: int = 30,
 ) -> EpisodeGraphExtraction:
-    system_prompt = _build_window_system_prompt(family_tree_lines or [])
+    system_prompt = _build_window_system_prompt(
+        family_tree_lines or [],
+        character_descriptions=character_descriptions,
+    )
     user_prompt = _build_window_user_prompt(
         core_text=core_text,
         prev_context_text=prev_context_text,
@@ -596,7 +609,7 @@ def extract_window_graph_with_llm(
     raise ValueError(f"llm extraction returned non-JSON content: {_clip_text(latest_raw)}")
 
 
-def _build_window_system_prompt(family_tree_lines: list[str]) -> str:
+def _build_window_system_prompt(family_tree_lines: list[str], character_descriptions: list[str] | None = None) -> str:
     honorific_rules = "\n".join(
         [
             "",
@@ -623,7 +636,18 @@ def _build_window_system_prompt(family_tree_lines: list[str]) -> str:
                 "注意：族谱中的关系可能不完整。如果文中出现与族谱矛盾的信息，以原文为准。",
             ]
         )
-        return base + tree_section
+        base += tree_section
+    if character_descriptions:
+        desc_section = "\n".join(
+            [
+                "",
+                "【人物描述缓存】",
+                "以下是已出现的高频角色描述，用于区分同名不同代的角色：",
+                *character_descriptions,
+                "",
+            ]
+        )
+        base += desc_section
     return base
 
 
@@ -634,14 +658,19 @@ def _build_window_user_prompt(
     chapter_index: int,
     known_entities: list[KnownEntityCandidate],
 ) -> str:
-    known_entity_lines = [
-        (
-            f"- {item.entity_id} | {item.canonical_name} | type={item.entity_type} "
-            f"| aliases={','.join(item.aliases[:5])} | mentions={item.mention_count} "
-            f"| last_seen=c{item.last_seen_chapter}/p{item.last_seen_paragraph}"
-        )
-        for item in known_entities[:30]
-    ]
+    known_entity_lines = []
+    for item in known_entities[:30]:
+        parts = [
+            f"- {item.entity_id} | {item.canonical_name} | type={item.entity_type}",
+        ]
+        if item.summary:
+            parts.append(f"desc=\"{item.summary[:100]}\"")
+        if item.generation:
+            parts.append(f"gen={item.generation}")
+        parts.append(f"aliases={','.join(item.aliases[:5])}")
+        parts.append(f"mentions={item.mention_count}")
+        parts.append(f"last_seen=c{item.last_seen_chapter}/p{item.last_seen_paragraph}")
+        known_entity_lines.append(" | ".join(parts))
     parts: list[str] = [
         f"当前章节: 第 {chapter_index} 章",
         "",

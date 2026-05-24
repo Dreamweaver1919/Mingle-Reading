@@ -165,11 +165,15 @@ class TemporalGraphBuilder:
         progress_callback: Callable[[dict], None] | None = None,
         strict_llm_extraction: bool = False,
         build_logger: build_logger_mod.GraphBuildLogger | None = None,
+        use_description_cache: bool = True,
+        use_generation_info: bool = True,
     ) -> None:
         self.extractor_runtime = extractor_runtime or llm_extraction.resolve_graph_extractor_runtime()
         self.progress_callback = progress_callback
         self.strict_llm_extraction = strict_llm_extraction
         self.build_logger = build_logger
+        self.use_description_cache = use_description_cache
+        self.use_generation_info = use_generation_info
 
     def build(self, book: BookRecord) -> TemporalContextGraph:
         if self.strict_llm_extraction and self.extractor_runtime is None:
@@ -318,7 +322,7 @@ class TemporalGraphBuilder:
                 with open(win_checkpoint_path, "a", encoding="utf-8") as fh:
                     fh.write(json.dumps(checkpoint_record, ensure_ascii=False) + "\n")
                 graph_storage.save_graph(graph)
-                time.sleep(0.5)  # avoid API rate-limiting
+                time.sleep(3.0)  # avoid API rate-limiting
         else:
             windows = []
 
@@ -1638,6 +1642,87 @@ class TemporalGraphBuilder:
                     lines.append(f"{src.canonical_name} --[FAMILY_OF]--> {tgt.canonical_name} ({rel.fact})")
         return lines
 
+    def _build_character_description_cache(self, graph: TemporalContextGraph) -> list[str]:
+        """Build behavior-rich descriptions for character disambiguation (LINK-KG style).
+
+        Each description includes identity (who they ARE), behavior (what they DO),
+        and chapter span — so the LLM can distinguish characters even when names are
+        ambiguous in the current text.
+        """
+        gen_map = self._infer_generation_map(graph)
+        lines: list[str] = []
+        for entity in sorted(graph.entities.values(), key=lambda e: e.mention_count, reverse=True):
+            if entity.mention_count < 3:
+                continue
+            if entity.entity_type != "character":
+                continue
+            ch_span = entity.metadata.get("chapter_span", [])
+            ch_range = f"ch{ch_span[0]}" if ch_span and len(ch_span) == 1 else f"ch{ch_span[0]}-{ch_span[-1]}" if ch_span else "?"
+
+            # Identity from FAMILY_OF
+            identity: list[str] = []
+            # Behavioral facts from interactions
+            behaviors: list[str] = []
+            for rel in graph.relations.values():
+                if rel.status != "active":
+                    continue
+                if rel.source_entity_id == entity.entity_id:
+                    other = graph.entities.get(rel.target_entity_id)
+                    if not other:
+                        continue
+                    if rel.relation_type == "FAMILY_OF":
+                        identity.append(rel.fact)
+                    elif rel.relation_type in ("SPOKE_WITH", "CARES_ABOUT", "CONFLICTS_WITH"):
+                        behaviors.append(f"{rel.relation_type} {other.canonical_name}: {rel.fact}")
+                elif rel.target_entity_id == entity.entity_id:
+                    other = graph.entities.get(rel.source_entity_id)
+                    if not other:
+                        continue
+                    if rel.relation_type == "FAMILY_OF":
+                        identity.append(rel.fact)
+                    elif rel.relation_type in ("SPOKE_WITH", "CARES_ABOUT", "CONFLICTS_WITH"):
+                        behaviors.append(f"{other.canonical_name} {rel.relation_type}: {rel.fact}")
+
+            # Build compact description
+            parts = [f"-{entity.canonical_name}"]
+            gen = gen_map.get(entity.entity_id, 0)
+            if gen:
+                parts.append(f" gen{gen}")
+            if identity:
+                parts.append(f" [{'; '.join(identity[:3])}]")
+            # Add recent behaviors (first 2, truncated)
+            if behaviors:
+                behavior_text = "; ".join(b[:60] for b in behaviors[:2])
+                parts.append(f" |最近行为: {behavior_text}")
+            if ch_range:
+                parts.append(f" |{ch_range} mc{entity.mention_count}")
+
+            desc = "".join(parts)
+            lines.append(desc)
+        return lines
+
+    def _infer_generation_map(self, graph: TemporalContextGraph) -> dict[str, int]:
+        """BFS from founder entities to infer generation numbers."""
+        children_of: dict[str, list[str]] = defaultdict(list)
+        has_parent: set[str] = set()
+        for rel in graph.relations.values():
+            if rel.relation_type == "FAMILY_OF" and rel.status == "active":
+                children_of[rel.source_entity_id].append(rel.target_entity_id)
+                has_parent.add(rel.target_entity_id)
+
+        generations: dict[str, int] = {}
+        queue: list[tuple[str, int]] = [
+            (eid, 1) for eid in graph.entities.keys() if eid not in has_parent
+        ]
+        while queue:
+            eid, gen = queue.pop(0)
+            if eid in generations:
+                continue
+            generations[eid] = gen
+            for child in children_of.get(eid, []):
+                queue.append((child, gen + 1))
+        return generations
+
     def _extract_window_with_llm(
         self,
         *,
@@ -1648,6 +1733,8 @@ class TemporalGraphBuilder:
             return None
 
         first_chunk = window.core_chunks[0]
+        gen_map = self._infer_generation_map(graph) if self.use_generation_info else {}
+
         known_entities = [
             llm_extraction.KnownEntityCandidate(
                 entity_id=entity.entity_id,
@@ -1657,6 +1744,8 @@ class TemporalGraphBuilder:
                 mention_count=entity.mention_count,
                 last_seen_chapter=entity.last_seen_chapter,
                 last_seen_paragraph=entity.last_seen_paragraph,
+                summary=entity.summary,
+                generation=gen_map.get(entity.entity_id, 0),
             )
             for entity in sorted(graph.entities.values(), key=lambda item: item.mention_count, reverse=True)
             if entity.last_seen_chapter < window.chapter_index
@@ -1667,6 +1756,7 @@ class TemporalGraphBuilder:
         ]
 
         family_tree = self._build_family_tree_context(graph)
+        character_descriptions = self._build_character_description_cache(graph) if self.use_description_cache else None
 
         try:
             graph.metadata["llm_calls"] = int(graph.metadata.get("llm_calls", 0)) + 1
@@ -1693,6 +1783,7 @@ class TemporalGraphBuilder:
                 chapter_index=window.chapter_index,
                 known_entities=known_entities,
                 family_tree_lines=family_tree,
+                character_descriptions=character_descriptions,
             )
             self._emit_progress(
                 stage="llm-response-received",

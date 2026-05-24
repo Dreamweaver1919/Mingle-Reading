@@ -165,6 +165,16 @@
     <input type="range" id="to-chapter" min="1" max="23" value="23" step="1">
     <span id="to-val">23</span>
   </div>
+	  <div class="range-group">
+	    <label for="min-weight">Min Wt</label>
+	    <input type="range" id="min-weight" min="0" max="50" value="0" step="1">
+	    <span id="weight-val">0</span>
+	  </div>
+	  <div class="range-group">
+	    <label for="max-edges">Max Edges</label>
+	    <input type="range" id="max-edges" min="10" max="600" value="300" step="10">
+	    <span id="edges-val">300</span>
+	  </div>
   <button id="refresh-btn" type="button">Refresh</button>
   <span class="stats" id="graph-stats"></span>
 </div>
@@ -270,7 +280,9 @@ async function loadGraph() {
   if (!state.bookId) return;
   const fromCh = Number(document.getElementById("from-chapter").value);
   const toCh = Number(document.getElementById("to-chapter").value);
-  const url = `/api/books/${encodeURIComponent(state.bookId)}/graph/view?scope=book&chapter=${toCh}&from_chapter=${fromCh}&limit=200`;
+  const minW = document.getElementById("min-weight").value;
+  const maxE = document.getElementById("max-edges").value;
+  const url = `/api/books/${encodeURIComponent(state.bookId)}/graph/view?scope=book&chapter=${toCh}&from_chapter=${fromCh}&limit=200&min_weight=${minW}&max_edges=${maxE}`;
   state.data = await fetchJSON(url);
   state.chapterCount = Math.max(state.data.chapter_index || 1, state.chapterCount);
   document.getElementById("to-chapter").max = String(state.chapterCount);

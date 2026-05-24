@@ -951,7 +951,7 @@ async function refreshKnowledgeGraph() {
       limit: "18",
       scope: state.graphViewScope,
     });
-    state.graphViewData = await fetchJSON(`/api/books/${state.activeBook}/graph/view?${query.toString()}`);
+    state.graphViewData = await fetchJSON(`/api/books/${encodeURIComponent(state.activeBook)}/graph/view?${query.toString()}`);
   } catch (error) {
     state.graphViewError = error.message;
   } finally {
@@ -1115,7 +1115,7 @@ async function fetchInlineBubbles() {
     return;
   }
   try {
-    const bubbles = await fetchJSON(`/api/books/${state.activeBook}/inline-bubbles`, {
+    const bubbles = await fetchJSON(`/api/books/${encodeURIComponent(state.activeBook)}/inline-bubbles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1152,7 +1152,7 @@ async function loadCharacterCandidates() {
   setButtonLoading("character-generate-btn", true, "Loading candidates...");
   try {
     state.characterCandidates = await fetchJSON(
-      `/api/books/${state.activeBook}/characters?current_chapter=${state.activeChapter}&limit=200`
+      `/api/books/${encodeURIComponent(state.activeBook)}/characters?current_chapter=${state.activeChapter}&limit=200`
     );
     renderCharacterCandidates();
   } catch (error) {
@@ -1186,7 +1186,7 @@ async function generateCharacterProfile() {
   startPendingWorkflow("characterProfile", "building-profile");
 
   try {
-    const profile = await fetchJSON(`/api/books/${state.activeBook}/characters/profile`, {
+    const profile = await fetchJSON(`/api/books/${encodeURIComponent(state.activeBook)}/characters/profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1293,7 +1293,7 @@ async function openBook(bookId) {
   } catch (_error) {
     // Ignore storage errors and keep the current session alive.
   }
-  state.activeBookDetail = await fetchJSON(`/api/books/${bookId}`);
+  state.activeBookDetail = await fetchJSON(`/api/books/${encodeURIComponent(bookId)}`);
   state.personaConversation = [];
   state.characterConversation = [];
   state.activeCharacterName = "";
@@ -1385,7 +1385,7 @@ async function askAssistant() {
       if (!state.activeCharacterName) {
         throw new Error("Choose or build a character profile before asking the character agent.");
       }
-      const response = await fetchJSON(`/api/books/${state.activeBook}/characters/chat`, {
+      const response = await fetchJSON(`/api/books/${encodeURIComponent(state.activeBook)}/characters/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
